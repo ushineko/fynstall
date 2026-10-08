@@ -1,0 +1,62 @@
+# fynstall
+
+**Version**: 0.1.0
+
+An installer framework for Go and [Fyne](https://fyne.io) programs. You
+describe a program in `fynstall.yaml`, and `fynstall build` produces one
+installer binary per target platform. The installer holds the whole payload
+through Go embedding, so the person who runs it needs no toolchain.
+
+## Status
+
+Early development. Nothing here builds an installer yet. The plan is
+[spec 001](specs/001-installer-prototype.md), delivered in phases; this
+README changes as each phase lands.
+
+## What it will do
+
+- **One binary, two front ends.** The installer runs as a wizard when it is
+  started from a desktop, and as a command-line program when it is started
+  from a terminal. `--gui` and `--cli` override the choice.
+- **An uninstaller that puts things back.** Each install puts a separate
+  uninstaller beside the program. The uninstaller removes what the install
+  created and restores what it replaced, including registry values on
+  Windows. Only the installed uninstaller removes a program, so removal
+  always matches what was installed.
+- **Per-user and system-wide installs.** A system install asks for
+  elevation once, for the step that writes files. The window never runs as
+  root.
+- **Desktop integration.** Launcher entries, icons at every size, and links
+  on `PATH` on Linux; Start Menu shortcuts and an entry in Settings > Apps on
+  Windows.
+- **A command-line-only build** with no Fyne and no cgo, for machines with
+  no graphics libraries.
+
+Linux comes first, then Windows. macOS is later.
+
+## Development
+
+```bash
+make setup        # installs the pinned golangci-lint
+make test
+make lint
+make build        # bin/fynstall
+make hello        # bin/hello, the example program the tests install
+```
+
+Go 1.26 or newer. Anything with a window needs cgo, OpenGL and X11/Wayland
+headers.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
+
+## Changelog
+
+### Unreleased
+
+- Project skeleton: module, Makefile, lint configuration, the `fynstall
+  version` command and the `examples/hello` program (spec 001 phase 0,
+  [#1](https://github.com/ushineko/fynstall/issues/1)).
