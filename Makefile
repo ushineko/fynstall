@@ -93,8 +93,8 @@ build: ## Build the fynstall builder into bin/
 # The example program every test and desk check installs. Needs cgo and the
 # graphics headers, as any Fyne window does.
 .PHONY: hello
-hello: ## Build examples/hello into bin/
-	go build $(GOFLAGS) -o bin/hello ./examples/hello
+hello: ## Build examples/hello into examples/hello/bin/, where its fynstall.yaml looks
+	go build $(GOFLAGS) -o examples/hello/bin/hello ./examples/hello
 
 .PHONY: tidy
 tidy: ## go mod tidy

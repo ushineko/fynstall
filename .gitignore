@@ -2,3 +2,5 @@
 /dist/
 /.cache/
 coverage.out
+/examples/hello/bin/
+/examples/hello/dist/
