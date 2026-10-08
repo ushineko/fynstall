@@ -40,7 +40,7 @@ covers machines with no graphics libraries.
 
 ```
 fynstall.yaml ──► fynstall build ──► generated main package (temp dir)
-                    │                  ├─ main.go        → runtime.Main(manifest, payload)
+                    │                  ├─ main.go        → installer.Main(manifest, payload)
                     │                  ├─ manifest.json  (normalised config + per-file sha256 and mode)
                     │                  ├─ payload/…      (//go:embed all:payload)
                     │                  └─ uninstaller    (separate payload-free build; also written to dist/)
@@ -66,7 +66,7 @@ Module layout (proposed):
 | `config` | YAML schema, defaults, validation with line numbers in errors. |
 | `manifest` | The normalised form embedded in the installer. |
 | `builder` | Stages the payload, generates the main package, runs `go build`. |
-| `runtime` | `Main()`: flag parsing, mode selection, front-end dispatch. |
+| `installer` | `Main()` and `UninstallMain()`: flag parsing, mode selection, front-end dispatch. Named `installer` rather than `runtime`, which would hide the standard library package. |
 | `engine` | Plan, apply, receipt, uninstall, rollback. No UI imports. |
 | `platform` | Paths and desktop integration per OS and scope, behind build tags. |
 | `ui/cli`, `ui/gui` | The two front ends. `ui/gui` has the build tag `!nogui`. |
@@ -161,10 +161,14 @@ and scope in `platform`, so one config serves every target.
   version, scope, the fynstall runtime version, and a journal of every
   change: each path created, each file replaced (with its backup, see R9a),
   and each registry key or value created or changed (with its previous
-  value, Windows).
+  value, Windows). Apply also writes an install index entry,
+  `{data}/fynstall/installs/<id>.json`, which points at the install
+  directory and its uninstaller. A later installer finds an install through
+  it, wherever the user put the install. The entry is in the journal, so the
+  uninstaller removes it.
 - R9 See the Uninstaller requirements below (R9a–R9f).
-- R10 The engine emits events (step started, file progress, log line, step
-  done or failed) on a channel. The engine never imports a UI package. Both
+- R10 The engine reports events (step started, file written, warning)
+  through a callback that each front end supplies. The engine never imports a UI package. Both
   front ends consume the same events.
 
 ### Uninstaller
@@ -190,8 +194,9 @@ drifts from what is on disk.
 - R9c Apply installs the uninstaller as `<install dir>/uninstall`
   (`uninstall.exe` on Windows). Every system entry point for removal points
   at that installed file. On Windows this is the `UninstallString` in the
-  Uninstall registry key. On Linux the receipt records the path, and an
-  optional "Uninstall <name>" `.desktop` action points at it.
+  Uninstall registry key. On Linux the receipt and the install index record
+  the path. An optional "Uninstall <name>" `.desktop` action that points at
+  it is phase 2 work.
 - R9d The uninstaller reads the journal in reverse order. It removes what
   the install created, restores each backed-up file and previous registry
   value, removes registry keys the install created (Windows), and removes
@@ -290,40 +295,59 @@ already exist.
 
 ### Phase 1: config, build, CLI-only installer and uninstaller (R1–R3, R5–R10, R9a–R9e, R12)
 
-- [ ] Config tests: valid, unknown key, missing required field and bad
+Phase 1 refuses an existing install instead of layering over it. The
+installer names `--uninstall`, which runs the installed uninstaller (R9e).
+Upgrade, repair and downgrade stay in phase 6. `fynstall build` without
+`--cli-only` stops with a message that names phase 4.
+
+- [x] Config tests: valid, unknown key, missing required field and bad
       placeholder each give the expected error with line number (unit, table
-      driven).
-- [ ] Manifest test: modes detected for an ELF, a script and a text file.
+      driven). `config/config_test.go`, which also covers a `dst` that
+      leaves the install directory, a missing `src`, and all errors at once.
+- [x] Manifest test: modes detected for an ELF, a script and a text file.
       Entries are sorted. The same input twice gives byte-identical
-      `manifest.json` (unit).
-- [ ] Integration test: build the `hello` installer with `--cli-only`, run it
+      `manifest.json` (unit). `manifest/manifest_test.go`,
+      `builder/stage_test.go`.
+- [x] Integration test: build the `hello` installer with `--cli-only`, run it
       with `HOME` set to `t.TempDir()`, `--cli --yes --scope user`. Check
       every file against the manifest hashes, run the uninstaller, and check
       that the temp home holds only what it held before. This uses real files
       and real processes, with no mocks of the filesystem.
-- [ ] Uninstaller is a separate artifact: `build` writes
+      `TestInstallWritesThePayloadAndTheUninstallerRemovesIt`.
+- [x] Uninstaller is a separate artifact: `build` writes
       `dist/hello-*-uninstaller` beside the installer. The installed
       `uninstall` is byte-identical to it (R9b, R9c).
-- [ ] Restore test: a temp home holds a pre-existing file at a planned
-      destination and a pre-existing `~/.local/bin/hello`. After install
-      and uninstall, a recursive hash of the temp home matches the hash taken
-      before install (R9a, R9d).
-- [ ] Drift test: install with uninstaller v1, then replace the installer
-      with a build whose engine is changed by a test tag. Its Uninstall runs
-      the installed v1 uninstaller, which a marker in the uninstaller's
-      output shows (R9e).
-- [ ] Rollback test: a payload file whose hash is corrupted after build
-      makes Apply fail. The target holds exactly what it held before, and a
-      pre-existing file at a destination is restored (integration). This
-      is install-time rollback, separate from the uninstaller's restore.
-- [ ] Reproducibility: two builds of the same input have the same sha256.
-- [ ] R12: `ldd` on the `--cli-only` installer reports "not a dynamic
-      executable".
-- [ ] Desk check: `fynstall build --cli-only` in `examples/hello`, then
+- [x] Restore test: a temp home holds a pre-existing file at a planned
+      destination inside the install directory. After install and
+      uninstall, a recursive hash of the temp home matches the hash taken
+      before install (R9a, R9d). `TestUninstallRestoresAFileTheInstallReplaced`.
+      The pre-existing `~/.local/bin/hello` case moves to phase 2, which adds
+      the links (R15).
+- [x] Drift test: install with the v1 installer, then run a v2 installer
+      with `--uninstall`. The v2 build differs in its stamped runtime
+      version, and the output shows the v1 uninstaller's banner (R9e).
+      `TestANewerInstallerRemovesThroughTheInstalledUninstaller`. A mutation
+      that made `--uninstall` use the current engine failed this test.
+- [x] Rollback test: a payload file whose content no longer matches its
+      hash makes Apply fail. The target holds exactly what it held before,
+      and a pre-existing file at a destination is restored. This runs the
+      engine in-process against a real temporary filesystem, because an
+      embedded payload cannot be corrupted after the build without editing
+      the binary. It is install-time rollback, separate from the
+      uninstaller's restore.
+      `TestAFailedInstallUndoesItselfAndRestoresWhatItReplaced`.
+- [x] Reproducibility: two builds of the same input have the same sha256.
+      `TestBuildsAreReproducible`.
+- [x] R12: the `--cli-only` installer and uninstaller have no dynamic
+      loader and import no libraries (checked with `debug/elf`, which is
+      what `ldd`'s "not a dynamic executable" reports).
+      `TestCLIOnlyProgramsLinkNoLibraries`.
+- [x] Desk check: `fynstall build --cli-only` in `examples/hello`, then
       `./dist/hello-*-installer --dry-run`, then `--cli` interactive install.
-      Run `~/.local/share/io.ushineko.hello/bin/hello`, then run
-      installed `uninstall`. Nothing is left behind
-      (`find ~/.local -name '*hello*'`), and the uninstaller lists the
+      Run `~/.local/share/io.ushineko.hello/bin/hello`, then run the
+      installed `uninstall`. Nothing is left behind (the top-level listings
+      of `~/.local/share`, `~/.config` and `~/.local/bin` match those taken
+      before the install), and the uninstaller lists the
       `keep_on_uninstall` paths.
 
 ### Phase 2: Linux desktop integration, per-user (R4, R15, R16)
@@ -334,6 +358,8 @@ already exist.
       `desktop-file-validate` if it is installed, otherwise a parser check.
       Icons exist at every size. The `~/.local/bin/hello` link resolves.
       Uninstall removes all three.
+- [ ] Restore test, moved from phase 1: a pre-existing `~/.local/bin/hello`
+      is replaced by the link on install and restored on uninstall.
 - [ ] Desk check (KDE Plasma 6): after install, "Hello" appears in the
       application launcher with its icon at menu and panel sizes, and it
       starts from there. On Wayland the running window shows the icon in the
@@ -460,6 +486,23 @@ A file association and URL-scheme registration.
   rejects any destination that resolves outside its root (`..`, absolute
   `dst`, symlink escape) both at `validate` time and in `Apply`. It runs no
   payload content during install. Hashes are checked on extract.
+- **A crash during Apply leaves no receipt.** The journal is held in
+  memory and written into the receipt at the end. If the process is killed
+  mid-install, nothing records what it wrote, and no uninstaller exists yet.
+  An interrupt (Ctrl+C) is safe, because it cancels the context and Apply
+  undoes its work. Writing the journal to disk as it grows would close the
+  rest of the gap; that is not done in phase 1.
+- **Plan-to-Apply race.** The containment check (no symlink may carry a
+  write outside the install directory) runs when the plan is made. A
+  directory swapped for a symlink between the plan and the write is not
+  caught. For a per-user install, the only party able to do that already
+  owns the files. For system scope, phase 5's helper must plan and check
+  again as root (R14), and should write through `os.Root`.
+- **The receipt is trusted.** The uninstaller removes and restores the paths
+  its receipt lists. A receipt the user can edit can therefore make the
+  uninstaller delete any file that user owns, which the user can do anyway.
+  A system install keeps its receipt in a root-owned directory, so this
+  holds there too.
 - **Rollback of this project's own changes.** Every phase is additive. An
   installed app is removed by its uninstaller. If the uninstaller is lost,
   the receipt lists every path to remove by hand.
@@ -494,6 +537,32 @@ and `make vuln` (no vulnerabilities) pass.
   (Platform). No `io.ushineko.hello.desktop` exists before phase 2.
 - With `FYNE_PLATFORM=x11` (XWayland) the title bar and taskbar show the
   icon, which confirms the program sets it correctly.
+
+### Phase 1 (2026-10-08)
+
+Same machine. `make test` (with `-race`), `make lint` (0 issues) and
+`make vuln` (no vulnerabilities) pass. With a cold build cache the
+integration tests take about 105 seconds, most of it compiling Fyne for
+`examples/hello`; with a warm cache, about 2 seconds.
+
+Two mutations were checked: with `restore` disabled, the two restore tests
+fail; with `--uninstall` routed to the current engine, the drift test fails.
+
+Desk check, in the user's real home directory:
+
+- `--dry-run` listed 13 changes: 8 directories, 3 files with modes 755,
+  644 and 755, the index entry and the receipt. It changed nothing.
+- `--cli` under the shell's `!` prefix, which has no terminal, refused with
+  "There is no terminal to ask questions on. Run with --yes". The first
+  version of the terminal check treated `/dev/null` as a terminal; it now
+  uses the `TCGETS` ioctl.
+- In Konsole: an interactive install, Hello started from the install
+  directory, then `uninstall`. The user reports both ran without problems.
+- Afterwards, the top-level listings of `~/.local/share`, `~/.config` and
+  `~/.local/bin` matched those taken before the install.
+  `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
+  exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
+  rewrote while it ran, was still present with its sha256 unchanged.
 
 ### Plan
 

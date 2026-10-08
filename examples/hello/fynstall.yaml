@@ -1,0 +1,22 @@
+# The config every fynstall test and desk check builds. Run `make hello`
+# first: it builds the program into bin/ here.
+app:
+  id: io.ushineko.hello
+  name: Hello
+  version: 0.1.0
+  publisher: ushineko
+
+install:
+  scopes: [user]
+  dir:
+    user: "{data}/{id}"
+
+payload:
+  - src: bin/hello
+    dst: bin/hello
+  - src: README.md
+    dst: share/doc/README.md
+
+integration:
+  keep_on_uninstall:
+    - "{config}/io.ushineko.hello"

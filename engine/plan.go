@@ -1,0 +1,258 @@
+/*
+Package engine plans, applies and removes an install. It has no UI: both
+front ends drive it and print or draw the events it reports (spec 001, R10).
+
+Every change is in the Plan before any is made (R6). Apply records each
+change in a journal as it makes it, and the journal is what the receipt
+holds and what the uninstaller replays in reverse (R8, R9a, R9d).
+*/
+package engine
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
+
+	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/platform"
+)
+
+// Names inside an install directory that fynstall owns.
+const (
+	MetaDir       = ".fynstall"
+	ReceiptName   = "receipt.json"
+	BackupDir     = "backup"
+	UninstallName = "uninstall"
+)
+
+// Source says where Apply reads a planned file from.
+type Source int
+
+const (
+	// FromPayload reads the file from the embedded payload.
+	FromPayload Source = iota
+	// FromUninstaller writes the uninstaller binary.
+	FromUninstaller
+)
+
+// PlannedFile is one file Apply will write.
+type PlannedFile struct {
+	manifest.File
+	// Dst is the absolute destination.
+	Dst string
+	// Exists is true when something is already at Dst; Apply backs it up
+	// and the uninstaller puts it back.
+	Exists bool
+	Source Source
+}
+
+// Plan is everything an install will change, computed without changing
+// anything.
+type Plan struct {
+	Manifest *manifest.Manifest
+	Scope    string
+	// Root is the absolute install directory.
+	Root string
+	// Index is the install index file for this app and scope.
+	Index string
+	// Keep are the expanded keep_on_uninstall paths.
+	Keep []string
+	// Dirs are the directories that do not exist yet, parents first.
+	Dirs  []string
+	Files []PlannedFile
+}
+
+// Options are the choices a front end passes to NewPlan.
+type Options struct {
+	Scope string
+	// Root overrides the manifest's install directory for Scope.
+	Root string
+	// Env reads environment variables; nil means os.Getenv.
+	Env func(string) string
+	// Uninstaller is the uninstaller binary Apply installs beside the program.
+	Uninstaller []byte
+}
+
+// ErrInstalled is returned by NewPlan when the index already has this app.
+var ErrInstalled = errors.New("already installed")
+
+// NewPlan works out what installing m would change.
+func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
+	if o.Env == nil {
+		o.Env = os.Getenv
+	}
+	if o.Scope == "" && len(m.Scopes) > 0 {
+		o.Scope = m.Scopes[0]
+	}
+	if !slices.Contains(m.Scopes, o.Scope) {
+		return nil, fmt.Errorf("scope %q is not offered by this installer (offered: %s)", o.Scope, strings.Join(m.Scopes, ", "))
+	}
+	vars, err := Vars(m, o.Scope, o.Env)
+	if err != nil {
+		return nil, err
+	}
+	p := &Plan{Manifest: m, Scope: o.Scope}
+
+	root := o.Root
+	if root == "" {
+		if root, err = manifest.Expand(m.Dirs[o.Scope], vars); err != nil {
+			return nil, fmt.Errorf("install directory: %w", err)
+		}
+	}
+	if !filepath.IsAbs(root) {
+		return nil, fmt.Errorf("install directory %q is not an absolute path", root)
+	}
+	p.Root = filepath.Clean(root)
+	p.Index = indexPath(vars, m.App.ID)
+	if _, err := os.Lstat(p.Index); err == nil {
+		return nil, fmt.Errorf("%s %w (index %s)", m.App.Name, ErrInstalled, p.Index)
+	}
+	if _, err := os.Lstat(filepath.Join(p.Root, MetaDir)); err == nil {
+		return nil, fmt.Errorf("%s already holds a fynstall install that is not in the index; remove it first", p.Root)
+	}
+	for _, k := range m.KeepOnUninstall {
+		path, err := manifest.Expand(k, vars)
+		if err != nil {
+			return nil, fmt.Errorf("keep_on_uninstall: %w", err)
+		}
+		p.Keep = append(p.Keep, filepath.Clean(path))
+	}
+
+	for _, f := range m.Files {
+		if err := p.addFile(f, FromPayload); err != nil {
+			return nil, err
+		}
+	}
+	sum := sha256.Sum256(o.Uninstaller)
+	if err := p.addFile(manifest.File{
+		Path: UninstallName, Size: int64(len(o.Uninstaller)),
+		SHA256: hex.EncodeToString(sum[:]), Mode: 0o755,
+	}, FromUninstaller); err != nil {
+		return nil, err
+	}
+
+	dirs := []string{p.Root, filepath.Join(p.Root, MetaDir), filepath.Join(p.Root, MetaDir, BackupDir), filepath.Dir(p.Index)}
+	for _, f := range p.Files {
+		dirs = append(dirs, filepath.Dir(f.Dst))
+	}
+	if p.Dirs, err = missingDirs(dirs); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// Vars are the placeholder values for m in scope: the platform's locations
+// and the app's id, name and version.
+func Vars(m *manifest.Manifest, scope string, env func(string) string) (map[string]string, error) {
+	v, err := platform.Vars(scope, env)
+	if err != nil {
+		return nil, fmt.Errorf("resolve paths: %w", err)
+	}
+	v["id"], v["name"], v["version"] = m.App.ID, m.App.Name, m.App.Version
+	return v, nil
+}
+
+func indexPath(vars map[string]string, id string) string {
+	return filepath.Join(platform.IndexDir(vars), id+".json")
+}
+
+func (p *Plan) addFile(f manifest.File, src Source) error {
+	dst := filepath.Join(p.Root, filepath.FromSlash(f.Path))
+	if err := Contained(p.Root, dst); err != nil {
+		return err
+	}
+	pf := PlannedFile{File: f, Dst: dst, Source: src}
+	switch fi, err := os.Lstat(dst); {
+	case err == nil && fi.IsDir():
+		return fmt.Errorf("%s is a directory, and the payload has a file there", dst)
+	case err == nil:
+		pf.Exists = true
+	case !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("check %s: %w", dst, err)
+	}
+	p.Files = append(p.Files, pf)
+	return nil
+}
+
+// Contained returns an error unless path, with every symlink in its
+// existing part resolved, is inside root resolved the same way. A link in
+// the install directory must not carry a write somewhere else.
+func Contained(root, path string) error {
+	r, err := resolve(root)
+	if err != nil {
+		return err
+	}
+	q, err := resolve(path)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(r, q)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("%s resolves to %s, outside the install directory %s", path, q, r)
+	}
+	return nil
+}
+
+// resolve is filepath.EvalSymlinks on the longest existing prefix of p,
+// with the rest appended: p need not exist yet.
+func resolve(p string) (string, error) {
+	p = filepath.Clean(p)
+	var rest []string
+	for {
+		resolved, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			return filepath.Join(append([]string{resolved}, rest...)...), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("resolve %s: %w", p, err)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(append([]string{p}, rest...)...), nil
+		}
+		rest = append([]string{filepath.Base(p)}, rest...)
+		p = parent
+	}
+}
+
+// missingDirs returns each directory in dirs, and each of their ancestors,
+// that does not exist, parents first. Something that exists and is not a
+// directory is an error.
+func missingDirs(dirs []string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range dirs {
+		for d = filepath.Clean(d); !seen[d]; d = filepath.Dir(d) {
+			seen[d] = true
+			fi, err := os.Stat(d)
+			if err == nil {
+				if !fi.IsDir() {
+					return nil, fmt.Errorf("%s is not a directory", d)
+				}
+				break
+			}
+			if !errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("check %s: %w", d, err)
+			}
+			out = append(out, d)
+			if filepath.Dir(d) == d {
+				break
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		di, dj := strings.Count(out[i], string(filepath.Separator)), strings.Count(out[j], string(filepath.Separator))
+		if di != dj {
+			return di < dj
+		}
+		return out[i] < out[j]
+	})
+	return out, nil
+}

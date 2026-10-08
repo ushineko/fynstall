@@ -9,9 +9,30 @@ through Go embedding, so the person who runs it needs no toolchain.
 
 ## Status
 
-Early development. Nothing here builds an installer yet. The plan is
-[spec 001](specs/001-installer-prototype.md), delivered in phases; this
-README changes as each phase lands.
+Early development. The plan is [spec 001](specs/001-installer-prototype.md),
+delivered in phases; this README changes as each phase lands.
+
+Phase 1 builds command-line installers for Linux, per-user. Desktop
+integration, the wizard, system-wide installs, upgrades and Windows follow.
+
+## Using it
+
+```bash
+fynstall init                  # writes a commented fynstall.yaml
+fynstall validate              # lists every problem, with line numbers
+fynstall build --cli-only      # dist/<name>-<version>-<os>-<arch>-installer
+                               # and the matching -uninstaller
+```
+
+The installer asks where to install and asks for confirmation. `--yes`
+accepts the defaults, `--dry-run` lists every change and makes none, and
+`--dir` chooses the directory. Run `<install directory>/uninstall` to remove
+the program. A newer installer's `--uninstall` runs that same file.
+
+Until fynstall has a release, build against a checkout:
+`fynstall build --cli-only --runtime-path <path to fynstall>`.
+
+The config format is in [docs/config.md](docs/config.md).
 
 ## What it will do
 
@@ -41,11 +62,12 @@ make setup        # installs the pinned golangci-lint
 make test
 make lint
 make build        # bin/fynstall
-make hello        # bin/hello, the example program the tests install
+make hello        # examples/hello/bin/hello, the program the tests install
 ```
 
 Go 1.26 or newer. Anything with a window needs cgo, OpenGL and X11/Wayland
-headers.
+headers. `make test` builds real installers and runs them in temporary
+directories; it needs the Go module cache but not the network.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
@@ -56,6 +78,13 @@ MIT. See [LICENSE](LICENSE).
 ## Changelog
 
 ### Unreleased
+
+- Command-line installers for Linux, per-user: `fynstall init`, `validate`
+  and `build --cli-only`. The installer checks each file's sha256, undoes a
+  failed install, and installs a separate uninstaller that restores what the
+  install replaced. A newer installer's `--uninstall` runs the installed
+  uninstaller (spec 001 phase 1,
+  [#1](https://github.com/ushineko/fynstall/issues/1)).
 
 - Project skeleton: module, Makefile, lint configuration, the `fynstall
   version` command and the `examples/hello` program (spec 001 phase 0,
