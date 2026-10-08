@@ -1,0 +1,489 @@
+# Spec 001: installer prototype
+
+**Issue**: [#1](https://github.com/ushineko/fynstall/issues/1)
+**Depends on**: [fynedesygn spec 056 / #172](https://github.com/ushineko/fynedesygn/issues/172) (the `wizard` package), phase 4 only
+
+## Status: INCOMPLETE
+
+## Executive Summary
+
+Populated before the first PR is opened.
+
+## Context
+
+The Go/Fyne programs in the fynedesygn "Used by" table install with
+hand-written scripts. clockwork-orange's `install.sh` is typical. It builds
+from a checkout, copies binaries into `~/.local/bin`, writes a `.desktop` entry
+and an icon at seven hicolor sizes, supports `--dry-run` and `--no-gui`, and
+leaves user data alone on uninstall. Each program carries its own copy of this
+logic, and it needs Go and a C toolchain on the target machine.
+
+fynstall replaces that with one tool. A developer writes `fynstall.yaml` and
+runs `fynstall build`. The result is one installer binary per target platform
+that holds the whole payload through Go embedding. The end user runs it, with
+no toolchain needed.
+
+The installer has two front ends over one install engine:
+
+- **GUI**: a wizard built on the fynedesygn `wizard` package (spec 056).
+- **CLI**: prompts in a terminal, or no prompts with `--yes` and flags.
+
+It selects the front end from how it was started: from a desktop (double-click)
+or from a terminal. `--gui` and `--cli` override the selection.
+
+Platforms in order: Linux (this spec, phases 1–6), Windows (phase 7), macOS
+(later, out of scope here). Install scope is per-user or system-wide, and both
+are supported. An optional CLI-only installer, built without Fyne and cgo,
+covers machines with no graphics libraries.
+
+### Architecture
+
+```
+fynstall.yaml ──► fynstall build ──► generated main package (temp dir)
+                    │                  ├─ main.go        → runtime.Main(manifest, payload)
+                    │                  ├─ manifest.json  (normalised config + per-file sha256 and mode)
+                    │                  ├─ payload/…      (//go:embed all:payload)
+                    │                  └─ uninstaller    (separate payload-free build; also written to dist/)
+                    └─► go build (GOOS/GOARCH, CGO, -tags nogui for --cli-only)
+                          └─► dist/<app>-<version>-<os>-<arch>-installer[.exe]
+
+installer at run time:
+  mode.Detect() ─► gui front end (wizard) ─┐
+               └─► cli front end ──────────┼─► engine.Plan() ─► engine.Apply(plan, events)
+                                           │        (privileged scope: Apply runs in a
+                                           │         helper process started with pkexec/sudo/UAC)
+                                           └─► receipt + journal written ─► uninstaller installed
+
+installed program:  <install dir>/uninstall  ◄── the only thing that removes it
+                    (Settings > Apps, CLI, a newer installer's Uninstall/Upgrade all call it)
+```
+
+Module layout (proposed):
+
+| Path | Purpose |
+|---|---|
+| `cmd/fynstall` | The builder: `init`, `validate`, `build`. |
+| `config` | YAML schema, defaults, validation with line numbers in errors. |
+| `manifest` | The normalised form embedded in the installer. |
+| `builder` | Stages the payload, generates the main package, runs `go build`. |
+| `runtime` | `Main()`: flag parsing, mode selection, front-end dispatch. |
+| `engine` | Plan, apply, receipt, uninstall, rollback. No UI imports. |
+| `platform` | Paths and desktop integration per OS and scope, behind build tags. |
+| `ui/cli`, `ui/gui` | The two front ends. `ui/gui` has the build tag `!nogui`. |
+| `examples/hello` | A small Fyne program with an icon and a `fynstall.yaml`; the fixture for every desk check. |
+
+### Config sketch
+
+```yaml
+app:
+  id: io.ushineko.hello          # reverse-DNS; used for .desktop name and registry key
+  name: Hello
+  version: 0.1.0                 # or: version_from: "git describe --tags"
+  publisher: ushineko
+  icon: assets/hello.png         # one PNG ≥ 512 px; build resizes to hicolor sizes / .ico
+  licence: LICENSE               # optional; adds the licence page
+
+install:
+  scopes: [user, system]         # which the user may choose; first is the default
+  dir:
+    user:   "{data}/{id}"        # ~/.local/share/io.ushineko.hello
+    system: "/opt/{id}"
+
+payload:
+  - src: bin/hello               # file; mode detected (ELF → 0755) unless given
+    dst: bin/hello
+  - src: share/                  # directory, recursive
+    dst: share/
+    exclude: ["*.tmp"]
+
+components:                      # optional; shown as checks on the options page
+  - id: gui
+    name: Desktop window
+    default: true
+    payload: [bin/hello-gui]
+
+integration:
+  path_links: [bin/hello]        # symlink into ~/.local/bin or /usr/local/bin
+  desktop:
+    - name: Hello
+      exec: bin/hello-gui
+      categories: [Utility]
+      component: gui
+  keep_on_uninstall:             # documented in the uninstaller output; never touched
+    - "{config}/hello"
+
+ui:
+  welcome: docs/welcome.md
+  finish:
+    launch: bin/hello-gui        # adds a "Launch now" check
+
+targets: [linux/amd64, windows/amd64]
+```
+
+Placeholders such as `{data}`, `{config}`, `{bin}` and `{id}` resolve per OS
+and scope in `platform`, so one config serves every target.
+
+## Requirements
+
+### Builder
+
+- R1 `fynstall init` writes a commented `fynstall.yaml` for the current
+  directory. `fynstall validate` reports every error with file, line and
+  field. An unknown key is an error.
+- R2 `fynstall build [-c fynstall.yaml] [--target os/arch ...] [--cli-only]
+  [-o dist/]` produces one installer per target. Builds are reproducible:
+  the same inputs give the same file. That means `-trimpath`, a fixed
+  mod time in the embedded tree, and sorted manifest entries.
+- R3 The manifest records, for every payload file, its destination,
+  sha256, size and mode. Mode is taken from the config, otherwise detected
+  (ELF, PE or `#!` gives 0755, and anything else gives 0644). This is needed
+  because `embed.FS` does not keep file modes.
+- R4 The build resizes the icon to the hicolor sizes (16, 32, 48, 64, 128,
+  256, 512) and to a multi-size `.ico` for Windows. The installer's own window
+  icon is the same image.
+- R5 The generated module requires the fynstall runtime at the builder's own
+  module version (from `debug.ReadBuildInfo`). For local development,
+  `--runtime-path` adds a `replace` directive.
+
+### Engine
+
+- R6 `Plan(manifest, choices) → Plan` lists every file, directory, link,
+  desktop entry and registry key the install will create or replace. It
+  makes no changes. `--dry-run` prints the plan in the CLI, and the GUI
+  summary page shows it.
+- R7 `Apply(plan, events)` writes each file to a temporary name in the
+  target directory, checks its sha256, then renames it into place. If a
+  step fails, Apply removes what this run created and restores what it
+  replaced. The previous state is then intact, or the error names the files
+  it could not restore.
+- R8 After a successful apply, the engine writes a receipt
+  (`<install dir>/.fynstall/receipt.json`). The receipt holds the app id,
+  version, scope, the fynstall runtime version, and a journal of every
+  change: each path created, each file replaced (with its backup, see R9a),
+  and each registry key or value created or changed (with its previous
+  value, Windows).
+- R9 See the Uninstaller requirements below (R9a–R9f).
+- R10 The engine emits events (step started, file progress, log line, step
+  done or failed) on a channel. The engine never imports a UI package. Both
+  front ends consume the same events.
+
+### Uninstaller
+
+The model is the one most installers use, and a fuller version of the
+`install.sh` / `uninstall.sh` pair. The uninstaller is a separate artifact.
+It is installed with the program, and it is the only code that removes that
+program. A newer fynstall can change how it installs. The installed program
+is always removed by the code that installed it, so the removal logic never
+drifts from what is on disk.
+
+- R9a Before Apply replaces or changes anything that existed before the
+  install, it records the original state. A pre-existing file is copied to
+  `<install dir>/.fynstall/backup/`. A pre-existing registry value is stored
+  in the receipt journal. A pre-existing `.desktop` entry, link or icon at a
+  planned path counts as a pre-existing file.
+- R9b `fynstall build` produces the uninstaller as its own artifact: a
+  payload-free build of the same runtime version, for the same target, with
+  both front ends and the same mode selection (R11, R19). A `--cli-only`
+  installer carries a `--cli-only` uninstaller. The uninstaller is written
+  to `dist/` next to the installer, so it can be inspected, and is embedded
+  in the installer.
+- R9c Apply installs the uninstaller as `<install dir>/uninstall`
+  (`uninstall.exe` on Windows). Every system entry point for removal points
+  at that installed file. On Windows this is the `UninstallString` in the
+  Uninstall registry key. On Linux the receipt records the path, and an
+  optional "Uninstall <name>" `.desktop` action points at it.
+- R9d The uninstaller reads the journal in reverse order. It removes what
+  the install created, restores each backed-up file and previous registry
+  value, removes registry keys the install created (Windows), and removes
+  directories that are then empty. The result is the system as it was before
+  the install, apart from paths in `keep_on_uninstall`. Those paths are never
+  touched, and the uninstaller prints them so the user knows where their
+  data is.
+- R9e A newer installer never removes an installed program with its own
+  logic. When it finds a receipt (R17), Uninstall and the remove step of an
+  upgrade run the installed uninstaller (`uninstall --quiet --keep-data` for
+  an upgrade) and wait for its exit code. If the installed uninstaller is
+  missing or fails, the installer stops, reports the receipt path, and offers
+  `--force-receipt-uninstall`. That option is an explicit, labelled fallback
+  that removes the receipt journal with the current engine.
+- R9f The uninstaller deletes itself last. On Windows it cannot delete its
+  own running executable, so it copies itself to `%TEMP%`, runs from there,
+  and schedules the copy for deletion with `MoveFileEx`
+  (`MOVEFILE_DELAY_UNTIL_REBOOT`).
+
+### Mode selection
+
+- R11 Linux: CLI when stdin is a terminal. GUI when stdin is not a terminal
+  and `WAYLAND_DISPLAY` or `DISPLAY` is set. Otherwise, CLI non-interactive,
+  which fails with a message naming `--yes` if input is needed. `--gui` and
+  `--cli` override this.
+- R12 A `--cli-only` installer (`-tags nogui`) has no Fyne dependency, is
+  built with `CGO_ENABLED=0`, and links no graphics libraries. `--gui` on
+  it fails with a clear message.
+
+### Scope and elevation
+
+- R13 Per-user scope never asks for elevation. System scope (Linux) runs
+  only `Apply` in a privileged helper, which is the same binary started with
+  `--apply-plan <file>` under `pkexec` (GUI) or `sudo` (CLI). The helper
+  streams events as JSON lines on stdout. The Fyne process never runs as
+  root.
+- R14 The plan file passed to the helper is written with mode 0600 in a
+  directory only the user can write. The helper re-checks every payload
+  sha256 from its own embedded copy. It does not trust hashes from the plan
+  file.
+
+### Desktop integration (Linux)
+
+- R15 Per-user scope: `.desktop` in `~/.local/share/applications`, icons in
+  `~/.local/share/icons/hicolor/<size>/apps`, and links in `~/.local/bin`.
+  System scope: `/usr/share/applications`, `/usr/share/icons/hicolor` and
+  `/usr/local/bin`. After a change, the engine refreshes the menu with
+  `update-desktop-database` and `kbuildsycoca6` if they are present. A
+  failure there is a warning and not an error.
+- R16 If `~/.local/bin` is not on `PATH`, the finish page and the CLI output
+  say so.
+
+### Upgrade
+
+- R17 When a receipt for the same app id and scope exists, the installer
+  offers Upgrade (newer version), Repair (same version) or Downgrade (older
+  version, with a confirmation). It also offers Uninstall. Uninstall and
+  the remove step of an upgrade, repair or downgrade go through the installed
+  uninstaller (R9e). The installer then installs fresh, so files the old
+  version had and the new one does not are removed by the code that put them
+  there.
+
+### Windows (phase 7)
+
+- R18 Cross-built from Linux with `x86_64-w64-mingw32-gcc`, which is
+  present on this machine. Per-user target is
+  `%LOCALAPPDATA%\Programs\<name>`. System target is
+  `%ProgramFiles%\<name>`. A Start Menu shortcut is created (`.lnk` through
+  IShellLink). An Uninstall registry entry under HKCU or HKLM makes the app
+  appear in Settings > Apps.
+- R19 Mode selection: GUI when the process is the only one attached to its
+  console (`GetConsoleProcessList` returns 1, which is how Explorer starts
+  it), and the console is then released. Otherwise CLI. System scope runs the
+  helper through `ShellExecuteEx` with `runas`.
+
+## Phases
+
+Each phase is one PR. Each phase ends with a **desk check**: a short
+script of commands and observations on this machine, recorded in the PR. Each
+phase leaves a working tool, so the work can stop after any phase.
+
+### Phase 0: bootstrap
+
+Go module `github.com/ushineko/fynstall`, Makefile (`setup` installs the
+pinned golangci-lint; `build`, `test`, `lint`, `vuln` = `govulncheck`, with the
+lint config in `config/` as in the sibling projects), README skeleton with a
+changelog under `### Unreleased`, `docs/style.md`, MIT licence, and
+`examples/hello` (a Fyne window on fynedesygn `shell` with an icon).
+`.claude/CLAUDE.md`, `CONTRIBUTING.md`, `MAINTAINERS.md` and the PR template
+already exist.
+
+- [ ] `make build test lint` passes on an empty skeleton.
+- [ ] Desk check: `go run ./examples/hello` opens a window.
+
+### Phase 1: config, build, CLI-only installer and uninstaller (R1–R3, R5–R10, R9a–R9e, R12)
+
+- [ ] Config tests: valid, unknown key, missing required field and bad
+      placeholder each give the expected error with line number (unit, table
+      driven).
+- [ ] Manifest test: modes detected for an ELF, a script and a text file.
+      Entries are sorted. The same input twice gives byte-identical
+      `manifest.json` (unit).
+- [ ] Integration test: build the `hello` installer with `--cli-only`, run it
+      with `HOME` set to `t.TempDir()`, `--cli --yes --scope user`. Check
+      every file against the manifest hashes, run the uninstaller, and check
+      that the temp home holds only what it held before. This uses real files
+      and real processes, with no mocks of the filesystem.
+- [ ] Uninstaller is a separate artifact: `build` writes
+      `dist/hello-*-uninstaller` beside the installer. The installed
+      `uninstall` is byte-identical to it (R9b, R9c).
+- [ ] Restore test: a temp home holds a pre-existing file at a planned
+      destination and a pre-existing `~/.local/bin/hello`. After install
+      and uninstall, a recursive hash of the temp home matches the hash taken
+      before install (R9a, R9d).
+- [ ] Drift test: install with uninstaller v1, then replace the installer
+      with a build whose engine is changed by a test tag. Its Uninstall runs
+      the installed v1 uninstaller, which a marker in the uninstaller's
+      output shows (R9e).
+- [ ] Rollback test: a payload file whose hash is corrupted after build
+      makes Apply fail. The target holds exactly what it held before, and a
+      pre-existing file at a destination is restored (integration). This
+      is install-time rollback, separate from the uninstaller's restore.
+- [ ] Reproducibility: two builds of the same input have the same sha256.
+- [ ] R12: `ldd` on the `--cli-only` installer reports "not a dynamic
+      executable".
+- [ ] Desk check: `fynstall build --cli-only` in `examples/hello`, then
+      `./dist/hello-*-installer --dry-run`, then `--cli` interactive install.
+      Run `~/.local/share/io.ushineko.hello/bin/hello`, then run
+      installed `uninstall`. Nothing is left behind
+      (`find ~/.local -name '*hello*'`), and the uninstaller lists the
+      `keep_on_uninstall` paths.
+
+### Phase 2: Linux desktop integration, per-user (R4, R15, R16)
+
+- [ ] Icon resize produces the seven sizes. Each is a valid PNG of the
+      stated size (unit).
+- [ ] Integration test (temp `HOME`, `XDG_DATA_HOME`): `.desktop` passes
+      `desktop-file-validate` if it is installed, otherwise a parser check.
+      Icons exist at every size. The `~/.local/bin/hello` link resolves.
+      Uninstall removes all three.
+- [ ] Desk check (KDE Plasma 6): after install, "Hello" appears in the
+      application launcher with its icon at menu and panel sizes, and it
+      starts from there. After uninstall it is gone from the launcher without
+      a logout.
+
+### Phase 3: fynedesygn `wizard` (fynedesygn spec 056)
+
+This phase is done in the fynedesygn repository and can run in parallel with
+phases 1 and 2. Its acceptance criteria are in that spec.
+
+- [ ] fynedesygn spec 056 is COMPLETE and released, and fynstall `go.mod`
+      requires that version.
+
+### Phase 4: GUI front end and mode selection (R11, R12)
+
+- [ ] `ui/gui` builds the page sequence from the manifest: Welcome, Licence
+      (if set), Scope (if more than one), Directory, Components (if any),
+      Summary (plan from R6), Progress (engine events), Finish (launch check
+      if set). Headless test with `wizard.Headless` drives a full install
+      into a temp `HOME` (integration).
+- [ ] Mode-selection unit tests over a table of (stdin is a terminal,
+      `DISPLAY`, `WAYLAND_DISPLAY`, flags) → mode.
+- [ ] The full installer and the `--cli-only` installer come from one
+      `fynstall build` call with both outputs requested.
+- [ ] Headless probe: the full installer run in a container with no
+      libGL or X11 libraries. The result is recorded: it fails to start, or
+      it starts in CLI mode. The README states which. The `--cli-only`
+      installer installs successfully in the same container.
+- [ ] Desk check: double-click the installer in Dolphin and the wizard
+      opens. Run it from Konsole and the CLI runs. `--gui` from Konsole
+      opens the wizard. Cancel during the progress page leaves no files.
+      Launch now on the finish page starts Hello.
+
+### Phase 5: system scope on Linux (R13, R14)
+
+- [ ] Helper protocol test: the parent starts the helper without elevation
+      (test hook), receives JSON events, and handles a helper crash as a
+      failed step (integration).
+- [ ] R14 test: a plan file whose hashes have been edited is refused by the
+      helper (integration).
+- [ ] Desk check: GUI install in system scope shows one pkexec prompt. Files
+      are in `/opt/io.ushineko.hello`, `/usr/share/applications` and
+      `/usr/local/bin`. `ps` during install shows the Fyne process running as
+      the user. CLI system install uses `sudo`. Uninstall in each case asks
+      for elevation once and removes everything.
+
+### Phase 6: upgrade, repair, and a real consumer (R17)
+
+- [ ] Integration tests: install 0.1.0, then install 0.2.0, which drops one
+      file. The 0.1.0 uninstaller runs (R9e), the dropped file is removed,
+      and the receipt is the 0.2.0 one. Repair
+      restores a deleted file. Downgrade asks for confirmation.
+- [ ] First consumer: a `fynstall.yaml` for clockwork-orange that produces the
+      same files as its `install.sh` (two binaries, `.desktop`, seven icon
+      sizes, the `--no-gui` equivalent as a component). The two results are
+      compared with `diff` of file lists in two temp homes.
+- [ ] Desk check: upgrade the installed Hello from Dolphin through the
+      wizard. The launcher entry stays, and the version in Hello's About
+      section changes.
+
+### Phase 7: Windows (R18, R19, R9f, registry restore in R9a/R9d)
+
+- [ ] `fynstall build --target windows/amd64` from Linux produces an `.exe`
+      with the icon embedded as a resource.
+- [ ] Desk check in the win11-kvm VM. Double-click opens the wizard with no
+      console window left open. From `cmd` and PowerShell the CLI runs and
+      prints. A per-user install appears in Start and in Settings > Apps.
+      Uninstall from Settings > Apps runs the installed `uninstall.exe` and
+      removes it. A registry export of HKCU (HKLM for system) before install
+      and after uninstall is identical (`reg export` + `fc`). The install
+      directory is gone after a reboot (R9f). A system install shows one UAC
+      prompt.
+- [ ] `--cli-only` Windows installer works over SSH or in a plain console.
+
+### Later (not this spec)
+
+macOS `.app` bundle into `~/Applications` or `/Applications`. Code signing
+(Authenticode, notarisation). Payload compression. Post-install hooks. Auto-update.
+A file association and URL-scheme registration.
+
+## Test Strategy
+
+- **Unit**: config parsing and validation, placeholder resolution,
+  manifest generation, mode selection table, icon resize, plan computation.
+- **Integration (load-bearing)**: every engine requirement is tested by
+  building a real installer from `examples/hello` and running it as a real
+  process against a temporary `HOME`. The filesystem, `go build` and the
+  installer are not mocked. The only fake is the elevation step, where the
+  helper is started without `pkexec`. Real elevation is covered by the
+  phase 5 desk check.
+- **Headless GUI**: `wizard.Headless` with `fynetest`, driving the real
+  engine into a temporary `HOME`.
+- **Desk checks**: one per phase, recorded in the PR, for what a headless test
+  cannot see: the launcher, double-click behaviour, pkexec and UAC prompts.
+
+## Risks & Assumptions
+
+- **Fyne needs cgo.** Every GUI build needs a C toolchain at build time. The
+  end user does not. The `--cli-only` build is the escape from cgo, not a
+  replacement for the GUI.
+- **Headless start-up (phase 4 probe).** A binary that links libGL
+  dynamically may fail at load on a machine without it, before `main`
+  runs. Mode selection cannot help in that case. The phase 4 probe records
+  the actual behaviour. The `--cli-only` installer is the answer for servers.
+- **Binary size.** `embed` stores files uncompressed, and the installer is
+  about the size of the payload plus about 25 MB of runtime. This is
+  acceptable for the prototype. Compression is listed under Later.
+- **Runtime version skew.** The generated installer is built against the
+  builder's runtime version (R5). A builder installed with `go install` from
+  a dirty tree has no proper version. In that case `build` requires
+  `--runtime-path`.
+- **Dolphin and executables.** KDE asks whether to run or open an executable
+  file, and a file downloaded through a browser has no execute bit. The
+  README states `chmod +x` for downloads. A wrapper is out of scope.
+- **pkexec and Wayland.** The helper design (R13) avoids running a GUI as
+  root, which pkexec does not support on Wayland.
+- **Windows console flash.** A console-subsystem binary started from Explorer
+  shows a console briefly before R19 releases it. The alternative
+  (GUI-subsystem binary with `AttachConsole`) gives broken prompt and output
+  ordering in `cmd`. The flash is accepted, and phase 7 decides whether to
+  revisit it.
+- **Security.** The installer writes only inside the planned paths. It
+  rejects any destination that resolves outside its root (`..`, absolute
+  `dst`, symlink escape) both at `validate` time and in `Apply`. It runs no
+  payload content during install. Hashes are checked on extract.
+- **Rollback of this project's own changes.** Every phase is additive. An
+  installed app is removed by its uninstaller. If the uninstaller is lost,
+  the receipt lists every path to remove by hand.
+
+## Alternatives Considered
+
+- Considered a prebuilt runtime stub with the payload archive appended to
+  the binary, so no Go toolchain is needed at build time. Rejected because
+  the requirement is Go embedding, and code signing tools reject trailing
+  data.
+- Considered running the whole installer as root under pkexec for system
+  scope. Rejected because Fyne under pkexec on Wayland has no display access,
+  and a GUI running as root is a larger attack surface.
+- Considered NSIS or Inno Setup for Windows. Rejected because it would give
+  two installer formats and two UIs for one product.
+
+## Verification
+
+Filled in as each phase lands, with the desk check results.
+
+### Plan
+
+- Environment: this machine (CachyOS, KDE Plasma 6, Wayland), a container
+  with no graphics libraries (phase 4), and the win11-kvm VM (phase 7).
+- Steps: the desk check of each phase, in order, with `examples/hello`, then
+  the clockwork-orange comparison in phase 6.
+- Expected result: each desk check passes as written, and the file-list
+  `diff` in phase 6 is empty.
+- Coverage: each desk check lists the requirements it covers in its phase
+  heading.
