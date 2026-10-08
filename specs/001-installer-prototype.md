@@ -283,8 +283,10 @@ changelog under `### Unreleased`, `docs/style.md`, MIT licence, and
 `.claude/CLAUDE.md`, `CONTRIBUTING.md`, `MAINTAINERS.md` and the PR template
 already exist.
 
-- [ ] `make build test lint` passes on an empty skeleton.
-- [ ] Desk check: `go run ./examples/hello` opens a window.
+- [x] `make build test lint` passes on an empty skeleton.
+- [x] Desk check: `go run ./examples/hello` opens a window. On Wayland the
+      taskbar and title bar show a generic icon until a desktop entry named
+      `io.ushineko.hello.desktop` exists; see Verification.
 
 ### Phase 1: config, build, CLI-only installer and uninstaller (R1–R3, R5–R10, R9a–R9e, R12)
 
@@ -334,7 +336,8 @@ already exist.
       Uninstall removes all three.
 - [ ] Desk check (KDE Plasma 6): after install, "Hello" appears in the
       application launcher with its icon at menu and panel sizes, and it
-      starts from there. After uninstall it is gone from the launcher without
+      starts from there. On Wayland the running window shows the icon in the
+      taskbar, which proves the desktop file's base name matches the app ID. After uninstall it is gone from the launcher without
       a logout.
 
 ### Phase 3: fynedesygn `wizard` (fynedesygn spec 056)
@@ -476,6 +479,21 @@ A file association and URL-scheme registration.
 ## Verification
 
 Filled in as each phase lands, with the desk check results.
+
+### Phase 0 (2026-10-08)
+
+On CachyOS with KDE Plasma 6 on Wayland. `make build`, `make hello`,
+`make test` (with `-race`), `make lint` (golangci-lint v2.12.2, 0 issues)
+and `make vuln` (no vulnerabilities) pass.
+
+- `bin/hello` opens a window titled "Hello 0.1.0" with the Hello and About
+  sections. About shows the icon at 72 px.
+- On Wayland the taskbar and title bar show a generic icon. KDE matches a
+  Wayland window to a desktop entry by `app_id` and does not use the icon
+  the program sets; fynedesygn records this in `docs/design-system.md`
+  (Platform). No `io.ushineko.hello.desktop` exists before phase 2.
+- With `FYNE_PLATFORM=x11` (XWayland) the title bar and taskbar show the
+  icon, which confirms the program sets it correctly.
 
 ### Plan
 
