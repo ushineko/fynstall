@@ -188,7 +188,7 @@ upgrade, and only the names of secret ones.
 Changes an install makes beyond copying files. Each action is recorded with
 its undo, as a file is, so the uninstaller reverses it. `config_file` is
 the only type so far; `service`, `run` and `migrate` come with spec 002
-phase 3.
+phase 4.
 
 ```yaml
 actions:

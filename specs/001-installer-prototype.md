@@ -462,8 +462,8 @@ Lands after spec 002 phase 1 (per-target payloads), with spec 002 phase 2
 
 ### Phase 5: system scope on Linux (R13, R14)
 
-Lands with spec 002 phase 3 (actions): the first phase whose installs change
-more than files.
+Lands with spec 002 phase 4 (actions): the first phase whose installs change
+more than files. Spec 002 phase 3 (symlinks and leftovers) comes first.
 
 - [ ] Helper protocol test: the parent starts the helper without elevation
       (test hook), receives JSON events, and handles a helper crash as a

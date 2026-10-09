@@ -100,6 +100,31 @@ that slot into existing phases; they are listed in
 
 Each decision below follows this rule.
 
+## The reference model: MSI, not NSIS
+
+Windows Installer (MSI) is the model for how fynstall behaves; NSIS is what
+is being replaced. NSIS runs a script that can do anything, and its
+footguns come with that. A common one is a silent install (`/S`) that
+installs into, and uninstalls from, the directory the installer happens to
+be in, with `RMDir /r`: one mistake, and an unrelated directory is gone.
+
+MSI's model is narrower, and fynstall follows it:
+
+- **An install removes only what it put there.** It has a record of every
+  change (fynstall's receipt and journal), and the uninstall reverses that
+  record, nothing more.
+- **Files the program created are not the installer's to delete without
+  asking.** They are left, and listed (D5).
+- **A failed install rolls back.** (fynstall: spec 001, R7.)
+- **One record per product,** found the same way every time. (fynstall: the
+  install index.)
+- **Nothing destructive is implicit.** A recursive delete, a write wherever
+  the current directory is, an unchecked script: each is a design problem
+  to raise, and anything destructive is shown before it happens.
+
+Each decision below is checked against this as well as against the
+one-config rule.
+
 ## Decisions
 
 Each decision gives the options and a recommendation. The user chooses.
@@ -198,6 +223,29 @@ it, and undoes in reverse, like a file.
     reference's "kill the program's processes" is an option on the service
     action (`stop_processes: [bin/hello{exe}]`), limited to processes whose
     executable is inside the install directory.
+  - **An uninstall hook** is a `run` action with `on: uninstall`: it runs
+    only at uninstall, before any file is removed, while the program's files
+    are still there. It is for what the *program* created at runtime and the
+    install cannot know about, such as a service the program registers
+    itself.
+
+    ```yaml
+    actions:
+      - run:
+          on: uninstall
+          exec: bin/hello{exe}
+          args: [service, stop]
+          continue_on_error: false   # the default: a failure stops the uninstall
+    ```
+
+    It runs a payload program, never a shell. It is listed in `--dry-run`
+    and on the uninstaller's question. A failure stops the uninstall and says
+    so, because removing files under a service that is still running is
+    worse than stopping; `continue_on_error: true` lets the uninstall go on.
+    The same `on:` also names the other points a hook can run at:
+    `install` (the default, with `undo`), `before_install` and
+    `after_install`. Hooks in Go, which can also add wizard pages, are spec
+    003; a `run` hook is for programs in any language.
 
 - **D2b: hooks only.** `pre_install`, `post_install` and `pre_uninstall`
   commands, as most installer tools have. It is simple to implement, but
@@ -213,6 +261,71 @@ fynstall: the receipt describes everything the install changed, and the
 uninstaller can undo it.
 
 **Decided: D2a** (2026-10-08).
+
+### D4: symlinks in the payload
+
+A real runtime has symlinks. A bundled CPython 3.14 runtime has 54, all of
+them the version links of shared libraries (`libffi.so -> libffi.so.8.4.0`),
+and all pointing inside the tree. fynstall refuses any symlink in a payload,
+so that runtime cannot be packaged at all. Dereferencing the links by hand
+made the tree 37% larger (288 MB to 396 MB). The installer did not grow,
+because the Go linker stores identical embedded files once, but the install
+did.
+
+- **D4a: keep a link as a link when it stays inside the payload**
+  (recommended). The builder records each symlink in the manifest by its
+  path and its target, as written. A target that is absolute, or that
+  resolves outside the payload entry it is in, is refused with the link's
+  path, as now. The engine makes each link with the journal's existing
+  link support, so the uninstaller removes it and restores whatever was
+  there.
+  - On Windows, a symlink needs a privilege a normal user does not have.
+    There the builder resolves each link to a copy of its target, so the
+    same config still builds (the one-config rule). The linker stores the
+    copy once, so the installer does not grow.
+  - A link whose target is a directory is kept as a link on Linux and
+    resolved to a copied tree on Windows.
+- **D4b: always resolve links to copies.** Simpler, and the same on every
+  platform, but it makes every Linux install of such a runtime larger, and
+  a program that checks its own files (`ldconfig`, a package's manifest)
+  may notice the difference.
+
+**Recommendation: D4a.**
+
+**Decided: D4a** (2026-10-09).
+
+### D5: files the program creates
+
+Python writes its bytecode cache (`__pycache__/*.pyc`) into its own
+directories the first time it runs. In the same test, the uninstaller
+removed every file it had installed, and left 19 `.pyc` files and the
+directories that held them, with a warning for each. The system was not as
+it was before, but deleting files the install did not create is the NSIS
+footgun this spec avoids.
+
+**Decided (2026-10-08): all three of the following.**
+
+1. **By default, a file the install did not create is never deleted.** The
+   uninstaller says what it left: in the window, a list and an explicit
+   "Remove them too" button; on the command line, the list and the flag
+   `--remove-leftovers`. Only files inside a directory the install created
+   are offered, and never a path that is kept.
+2. **The config can name the leftovers its program makes**, which the
+   uninstaller removes without asking:
+
+   ```yaml
+   uninstall:
+     remove: ["python/**/__pycache__"]
+   ```
+
+   Each pattern is relative to the install directory and cannot reach
+   outside it; validation refuses `..` and absolute patterns.
+3. **No recursive delete of a directory the install did not create, ever.**
+
+For Python there is also a fix at build time: compiling the bytecode when
+the payload is built, with hash-based `.pyc` files (Go embedding does not
+keep file times, so time-based ones would be rewritten). The cache is then
+part of the install and its uninstall. `docs/config.md` says so.
 
 ### D3: parameters, upgrades and kept data
 
@@ -344,11 +457,17 @@ Each phase is one PR with its own desk check, as in spec 001.
    wizard page and the CLI switches, and the `config_file` action. Desk
    check: an install that takes a value from each source and shows it in
    the written config file.
-3. **Actions (D2a)**, with spec 001 phase 5: the action journal, `service`
-   (systemd), `run` with `undo`, `migrate`, and stopping services before a
-   replace. Desk check: a systemd service that runs after install and is
-   gone after uninstall, with a pre-existing unit restored.
-4. **The experiment**, after spec 001 phase 7: a fynstall config that
+3. **Real runtimes (D4, D5)**, before spec 001 phase 5: symlinks in the
+   payload, the leftovers list and `--remove-leftovers`, and
+   `uninstall.remove`. Desk check: a bundled CPython runtime builds as it
+   is, installs, runs, and uninstalls; with `uninstall.remove` for its
+   bytecode cache, the home is as it was.
+4. **Actions (D2a)**, with spec 001 phase 5: the action journal, `service`
+   (systemd), `run` with `undo` and `on:` (the uninstall hook), `migrate`,
+   and stopping services before a replace. Desk check: a systemd service
+   that runs after install and is gone after uninstall, with a pre-existing
+   unit restored, and an uninstall hook that runs before any file goes.
+5. **The experiment**, after spec 001 phase 7: a fynstall config that
    reproduces the reference installer on Windows, compared in a VM against
    a checklist made from [Context](#context). The comparison covers
    behaviour, not file layout. Differences are written down, each as fixed,
@@ -432,7 +551,24 @@ Phase 2, parameters (CLI part; the wizard page lands with spec 001 phase 4):
       the precedence tests, since three parameters cannot show four
       sources at once.
 
-Experiment (phase 4):
+Phase 3, real runtimes:
+
+- [ ] D4 A payload symlink whose target is inside its entry is installed as
+      a link and removed by the uninstall; a link that was at its path
+      before is restored. An absolute target, or one that leaves the entry,
+      is refused with the link's path. A Windows target gets a copy of the
+      target instead.
+- [ ] D5 After an uninstall, files the program created inside a directory
+      the install created are listed, not deleted. `--remove-leftovers`,
+      or "Remove them too", deletes exactly those, and never a kept path.
+- [ ] D5 `uninstall.remove` patterns are removed without asking; a pattern
+      with `..` or an absolute path is a config error.
+- [ ] Desk check: the bundled CPython runtime, unchanged, builds, installs,
+      runs (`ssl`, `sqlite3`, `ctypes`) and uninstalls. With
+      `uninstall.remove: ["python/**/__pycache__"]` the home is as it was
+      before.
+
+Experiment (phase 5):
 
 - [ ] A fynstall config installs the reference program on Windows 11 per
       machine: files, service started with recovery actions, configuration
@@ -485,6 +621,20 @@ Experiment (phase 4):
 ## Verification
 
 Filled in as each phase lands.
+
+### A real runtime (2026-10-09)
+
+Before phase 3, a bundled CPython 3.14 runtime for linux/amd64 was packaged
+as a test of scale: 10,505 files, 1,459 directories, 54 symlinks, 288 MB.
+
+- As it is, the build refused it at the first symlink. All 54 point inside
+  the tree. This is D4.
+- Dereferenced with `cp -L`, the tree was 10,559 files and 396 MB. The
+  CLI-only installer was 275 MB, smaller than the tree: the Go linker
+  stores identical embedded files once. It built in 1.5 s, installed 10,560
+  files (399 MB) in 1.5 s, and the installed interpreter ran and imported
+  `ssl`, `sqlite3`, `ctypes` and `json`. The uninstall took 0.1 s and left
+  the 19 `.pyc` files Python had written when it ran. This is D5.
 
 ### Phase 1 (2026-10-08)
 
