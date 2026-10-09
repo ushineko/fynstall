@@ -38,11 +38,11 @@ func TestTheSameTreeGivesTheSameManifestBytes(t *testing.T) {
 		config.Entry{Src: "share", Dst: "share", Exclude: []string{"*.tmp"}},
 		config.Entry{Src: "bin/hello", Dst: "bin/"},
 	)
-	m1, _, _, err := stage(c, "test")
+	m1, _, _, err := stage(c, "test", "linux/amd64")
 	require.NoError(t, err)
 	b1, err := m1.Marshal()
 	require.NoError(t, err)
-	m2, _, _, err := stage(c, "test")
+	m2, _, _, err := stage(c, "test", "linux/amd64")
 	require.NoError(t, err)
 	b2, err := m2.Marshal()
 	require.NoError(t, err)
@@ -62,20 +62,49 @@ func TestTheSameTreeGivesTheSameManifestBytes(t *testing.T) {
 
 func TestAConfigModeOverridesDetection(t *testing.T) {
 	dir := tree(t, map[string]string{"bin/tool": "data"})
-	m, _, _, err := stage(cfg(dir, config.Entry{Src: "bin/tool", Dst: "bin/tool", Mode: "0750"}), "test")
+	m, _, _, err := stage(cfg(dir, config.Entry{Src: "bin/tool", Dst: "bin/tool", Mode: "0750"}), "test", "linux/amd64")
 	require.NoError(t, err)
 	require.Equal(t, uint32(0o750), m.Files[0].Mode)
 }
 
 func TestTwoSourcesForOneDestinationIsAnError(t *testing.T) {
 	dir := tree(t, map[string]string{"a": "1", "b": "2"})
-	_, _, _, err := stage(cfg(dir, config.Entry{Src: "a", Dst: "x"}, config.Entry{Src: "b", Dst: "x"}), "test")
+	_, _, _, err := stage(cfg(dir, config.Entry{Src: "a", Dst: "x"}, config.Entry{Src: "b", Dst: "x"}), "test", "linux/amd64")
 	require.ErrorContains(t, err, "both install to x")
 }
 
 func TestSymlinksInThePayloadAreRefused(t *testing.T) {
 	dir := tree(t, map[string]string{"share/a": "1"})
 	require.NoError(t, os.Symlink("a", filepath.Join(dir, "share", "link")))
-	_, _, _, err := stage(cfg(dir, config.Entry{Src: "share", Dst: "share"}), "test")
+	_, _, _, err := stage(cfg(dir, config.Entry{Src: "share", Dst: "share"}), "test", "linux/amd64")
 	require.ErrorContains(t, err, "symlinks are not followed")
+}
+
+func TestOneConfigStagesADifferentPayloadPerTarget(t *testing.T) {
+	dir := tree(t, map[string]string{
+		"build/linux-amd64/greet":       "\x7fELF amd64",
+		"build/linux-arm64/greet":       "\x7fELF arm64",
+		"build/windows-amd64/greet.exe": "MZ amd64",
+		"notes/arm64.txt":               "arm64 only",
+	})
+	c := cfg(dir,
+		config.Entry{Src: "build/{os}-{arch}/greet{exe}", Dst: "bin/greet{exe}"},
+		config.Entry{Src: "notes/arm64.txt", Dst: "share/arm64.txt", Targets: []string{"*/arm64"}},
+	)
+	c.Integration.PathLinks = []string{"bin/greet{exe}"}
+
+	files := func(target string) map[string]string {
+		m, staged, _, err := stage(c, "test", target)
+		require.NoError(t, err)
+		require.Equal(t, target, m.Target)
+		out := map[string]string{}
+		for _, s := range staged {
+			out[s.Path] = filepath.ToSlash(s.src[len(dir)+1:])
+		}
+		require.Equal(t, "greet"+map[bool]string{true: ".exe"}[target == "windows/amd64"], m.Links[0].Name)
+		return out
+	}
+	require.Equal(t, map[string]string{"bin/greet": "build/linux-amd64/greet"}, files("linux/amd64"))
+	require.Equal(t, map[string]string{"bin/greet": "build/linux-arm64/greet", "share/arm64.txt": "notes/arm64.txt"}, files("linux/arm64"))
+	require.Equal(t, map[string]string{"bin/greet.exe": "build/windows-amd64/greet.exe"}, files("windows/amd64"))
 }

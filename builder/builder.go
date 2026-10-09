@@ -102,20 +102,22 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 		return nil, err
 	}
 
-	m, files, generated, err := stage(c, o.RuntimeVersion)
-	if err != nil {
-		return nil, err
-	}
-	manifestJSON, err := m.Marshal()
-	if err != nil {
-		return nil, err
-	}
 	if err := os.MkdirAll(o.OutDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create %s: %w", o.OutDir, err)
 	}
 
 	var out []Artifact
 	for _, t := range targets {
+		// One manifest per target: the payload differs between targets
+		// (spec 002 D1a).
+		m, files, generated, err := stage(c, o.RuntimeVersion, t)
+		if err != nil {
+			return nil, err
+		}
+		manifestJSON, err := m.Marshal()
+		if err != nil {
+			return nil, err
+		}
 		goos, goarch, _ := strings.Cut(t, "/")
 		base := fmt.Sprintf("%s-%s-%s-%s", m.App.Basename(), m.App.Version, goos, goarch)
 		a := Artifact{

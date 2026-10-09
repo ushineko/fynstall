@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,11 +56,43 @@ type Install struct {
 }
 
 // Entry is one payload item: a file, or a directory copied recursively.
+// Src and Dst may use the build-time placeholders {os}, {arch} and {exe}.
 type Entry struct {
 	Src     string   `yaml:"src"`
 	Dst     string   `yaml:"dst"`
 	Mode    string   `yaml:"mode"`
 	Exclude []string `yaml:"exclude"`
+	// Targets limits the entry to these "os/arch" patterns, where either
+	// part may be "*". Empty means every target.
+	Targets []string `yaml:"targets"`
+}
+
+// Applies reports whether the entry is part of target's payload.
+func (e Entry) Applies(target string) bool { return Matches(e.Targets, target) }
+
+// Matches reports whether target ("os/arch") matches any of patterns, or
+// patterns is empty.
+func Matches(patterns []string, target string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	os, arch, _ := strings.Cut(target, "/")
+	for _, p := range patterns {
+		po, pa, _ := strings.Cut(p, "/")
+		if (po == "*" || po == os) && (pa == "*" || pa == arch) {
+			return true
+		}
+	}
+	return false
+}
+
+// BuildTargets are the targets the config is built for: its own targets,
+// or this machine's when it names none.
+func (c *Config) BuildTargets() []string {
+	if len(c.Targets) > 0 {
+		return c.Targets
+	}
+	return []string{runtime.GOOS + "/" + runtime.GOARCH}
 }
 
 // Integration is how the program meets the desktop.

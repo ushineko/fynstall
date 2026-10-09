@@ -24,7 +24,11 @@ type Manifest struct {
 	Schema int `json:"schema"`
 	// RuntimeVersion is the fynstall version the installer was built with.
 	RuntimeVersion string `json:"runtime_version"`
-	App            App    `json:"app"`
+	// Target is the "os/arch" the installer was built for. The payload is
+	// chosen per target (spec 002 D1a), so an installer refuses to run
+	// anywhere else.
+	Target string `json:"target"`
+	App    App    `json:"app"`
 	// Scopes the user may choose, the first being the default.
 	Scopes []string `json:"scopes"`
 	// Dirs maps a scope to its install directory template, such as

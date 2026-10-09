@@ -24,6 +24,7 @@ var (
 	idRE      = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)+$`)
 	versionRE = regexp.MustCompile(`^\d+\.\d+\.\d+([-+][0-9A-Za-z.+-]+)?$`)
 	modeRE    = regexp.MustCompile(`^0?[0-7]{3}$`)
+	targetRE  = regexp.MustCompile(`^(\*|[a-z0-9]+)/(\*|[a-z0-9]+)$`)
 )
 
 // embedForbidden are the characters go:embed refuses in a file name; a
@@ -154,15 +155,34 @@ func (k *checker) template(tmpl, field string, keys ...any) {
 
 func (k *checker) entry(c *Config, i int, e Entry) {
 	field := fmt.Sprintf("payload[%d]", i)
+	wellFormed := true
+	for j, t := range e.Targets {
+		if !targetRE.MatchString(t) {
+			k.fail(k.line("payload", i, "targets", j), field+".targets", "%q is not an os/arch pattern such as linux/amd64 or windows/*", t)
+			wellFormed = false
+		}
+	}
+	var applies []string
+	for _, t := range c.BuildTargets() {
+		if e.Applies(t) {
+			applies = append(applies, t)
+		}
+	}
+	if wellFormed && len(e.Targets) > 0 && len(applies) == 0 {
+		k.fail(k.line("payload", i, "targets"), field+".targets", "matches none of the targets this config builds (%s)", strings.Join(c.BuildTargets(), ", "))
+	}
+
 	if strings.TrimSpace(e.Src) == "" {
 		k.fail(k.line("payload", i), field+".src", "required")
-	} else if _, err := os.Lstat(filepath.Join(c.Dir, filepath.FromSlash(e.Src))); err != nil {
-		k.fail(k.line("payload", i, "src"), field+".src", "%s does not exist", e.Src)
+	} else if !k.buildTemplate(e.Src, field+".src", "payload", i, "src") {
+		k.sources(c, i, e, applies)
 	}
 	if strings.TrimSpace(e.Dst) == "" {
 		k.fail(k.line("payload", i), field+".dst", "required")
-	} else if msg := CheckDst(e.Dst); msg != "" {
-		k.fail(k.line("payload", i, "dst"), field+".dst", "%s", msg)
+	} else if !k.buildTemplate(e.Dst, field+".dst", "payload", i, "dst") {
+		if msg := CheckDst(e.Dst); msg != "" {
+			k.fail(k.line("payload", i, "dst"), field+".dst", "%s", msg)
+		}
 	}
 	if e.Mode != "" && !modeRE.MatchString(e.Mode) {
 		k.fail(k.line("payload", i, "mode"), field+".mode", "%q is not an octal mode such as 0755", e.Mode)
@@ -172,6 +192,39 @@ func (k *checker) entry(c *Config, i int, e Entry) {
 			k.fail(k.line("payload", i, "exclude", j), field+".exclude", "bad pattern %q", pat)
 		}
 	}
+}
+
+// sources checks that an entry's src exists. A src with placeholders exists
+// per target, so it is checked for each target the entry applies to, and
+// the error names the target that lacks it.
+func (k *checker) sources(c *Config, i int, e Entry, applies []string) {
+	field := fmt.Sprintf("payload[%d].src", i)
+	if !manifest.HasPlaceholder(e.Src) {
+		if _, err := os.Lstat(filepath.Join(c.Dir, filepath.FromSlash(e.Src))); err != nil {
+			k.fail(k.line("payload", i, "src"), field, "%s does not exist", e.Src)
+		}
+		return
+	}
+	for _, t := range applies {
+		src, err := manifest.Expand(e.Src, manifest.BuildVars(t))
+		if err != nil {
+			continue // buildTemplate has reported it
+		}
+		if _, err := os.Lstat(filepath.Join(c.Dir, filepath.FromSlash(src))); err != nil {
+			k.fail(k.line("payload", i, "src"), field, "%s does not exist (target %s)", src, t)
+		}
+	}
+}
+
+// buildTemplate reports an unknown build-time placeholder in tmpl, and
+// returns true when it did.
+func (k *checker) buildTemplate(tmpl, field string, keys ...any) bool {
+	unknown := manifest.UnknownIn(tmpl, manifest.BuildPlaceholders)
+	if len(unknown) > 0 {
+		k.fail(k.line(keys...), field, "unknown placeholder {%s} (a payload path may use {%s})",
+			strings.Join(unknown, "}, {"), strings.Join(manifest.BuildPlaceholders, "}, {"))
+	}
+	return len(unknown) > 0
 }
 
 func (k *checker) icon(c *Config) {
@@ -196,6 +249,9 @@ func (k *checker) links(c *Config) {
 	names := map[string]bool{}
 	for i, l := range c.Integration.PathLinks {
 		line := k.line("integration", "path_links", i)
+		if k.buildTemplate(l, "integration.path_links", "integration", "path_links", i) {
+			continue
+		}
 		if msg := CheckDst(l); msg != "" {
 			k.fail(line, "integration.path_links", "%s", msg)
 			continue
@@ -232,8 +288,10 @@ func (k *checker) desktop(c *Config) {
 		}
 		if strings.TrimSpace(d.Exec) == "" {
 			k.fail(at("exec"), field+".exec", "required")
-		} else if msg := CheckDst(d.Exec); msg != "" {
-			k.fail(at("exec"), field+".exec", "%s", msg)
+		} else if !k.buildTemplate(d.Exec, field+".exec", "integration", "desktop", i, "exec") {
+			if msg := CheckDst(d.Exec); msg != "" {
+				k.fail(at("exec"), field+".exec", "%s", msg)
+			}
 		}
 		for j, cat := range d.Categories {
 			if !categoryRE.MatchString(cat) {
