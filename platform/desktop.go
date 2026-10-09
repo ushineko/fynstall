@@ -23,9 +23,14 @@ func DesktopPath(id string) string {
 	return "applications/" + id + ".desktop"
 }
 
+// UninstallAction is the desktop action id of the Uninstall entry.
+const UninstallAction = "uninstall"
+
 // RenderDesktop returns the desktop entry for d, with exec the absolute
-// path of the program and icon the icon name ("" for none).
-func RenderDesktop(d manifest.Desktop, exec, icon string) []byte {
+// path of the program and icon the icon name ("" for none). A non-empty
+// uninstall is the uninstaller's path: the entry then has an Uninstall
+// action that runs it with --gui, so it needs no terminal.
+func RenderDesktop(d manifest.Desktop, exec, icon, uninstall string) []byte {
 	var b strings.Builder
 	line := func(k, v string) { fmt.Fprintf(&b, "%s=%s\n", k, v) }
 	b.WriteString("[Desktop Entry]\n")
@@ -48,6 +53,12 @@ func RenderDesktop(d manifest.Desktop, exec, icon string) []byte {
 	line("Terminal", fmt.Sprint(d.Terminal))
 	if len(d.Categories) > 0 {
 		line("Categories", strings.Join(d.Categories, ";")+";")
+	}
+	if uninstall != "" {
+		line("Actions", UninstallAction+";")
+		b.WriteString("\n[Desktop Action " + UninstallAction + "]\n")
+		line("Name", escapeString("Uninstall "+d.Name))
+		line("Exec", escapeString(quoteExecArg(uninstall)+" --gui"))
 	}
 	return []byte(b.String())
 }

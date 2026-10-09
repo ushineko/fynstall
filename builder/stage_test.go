@@ -3,6 +3,7 @@ package builder
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -78,6 +79,7 @@ func TestSymlinksInThePayloadAreRefused(t *testing.T) {
 	require.NoError(t, os.Symlink("a", filepath.Join(dir, "share", "link")))
 	_, _, _, err := stage(cfg(dir, config.Entry{Src: "share", Dst: "share"}), "test", "linux/amd64")
 	require.ErrorContains(t, err, "symlinks are not followed")
+	require.Equal(t, 1, strings.Count(err.Error(), "payload:"), "one prefix: %v", err)
 }
 
 func TestOneConfigStagesADifferentPayloadPerTarget(t *testing.T) {

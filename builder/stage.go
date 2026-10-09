@@ -109,6 +109,26 @@ func stage(c *config.Config, runtimeVersion, target string) (*manifest.Manifest,
 	for _, p := range c.Parameters {
 		m.Parameters = append(m.Parameters, manifest.Parameter(p))
 	}
+	for field, rel := range map[*string]string{&m.Licence: c.App.Licence, &m.Welcome: c.UI.Welcome} {
+		if rel == "" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(c.Dir, filepath.FromSlash(rel)))
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("read %s: %w", rel, err)
+		}
+		*field = string(b)
+	}
+	if c.UI.Launch != "" {
+		launch, err := expand(c.UI.Launch)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if _, ok := seen[path.Clean(launch)]; !ok {
+			return nil, nil, nil, fmt.Errorf("ui.launch: %s is not a payload file for %s", launch, target)
+		}
+		m.Launch = path.Clean(launch)
+	}
 	for _, a := range c.Actions {
 		if a.ConfigFile != nil {
 			m.ConfigFiles = append(m.ConfigFiles, manifest.ConfigFile{
@@ -172,7 +192,7 @@ func walk(root string, e config.Entry, fn func(file, rel string) error) error {
 		}
 		rel, err := filepath.Rel(root, p)
 		if err != nil {
-			return fmt.Errorf("payload: %w", err)
+			return fmt.Errorf("relative path: %w", err)
 		}
 		rel = filepath.ToSlash(rel)
 		if rel != "." && excluded(e.Exclude, d.Name(), rel) {
@@ -187,7 +207,7 @@ func walk(root string, e config.Entry, fn func(file, rel string) error) error {
 		case d.Type().IsRegular():
 			return fn(p, rel)
 		default:
-			return fmt.Errorf("payload: %s is not a regular file (symlinks are not followed)", p)
+			return fmt.Errorf("%s is not a regular file (symlinks are not followed)", p)
 		}
 	})
 	if err != nil {

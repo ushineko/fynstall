@@ -403,26 +403,62 @@ phases 1 and 2. Its acceptance criteria are in that spec.
 Lands after spec 002 phase 1 (per-target payloads), with spec 002 phase 2
 (parameters).
 
-- [ ] `ui/gui` builds the page sequence from the manifest: Welcome, Licence
-      (if set), Scope (if more than one), Directory, Components (if any),
-      Summary (plan from R6), Progress (engine events), Finish (launch check
-      if set). Headless test with `wizard.Headless` drives a full install
-      into a temp `HOME` (integration).
-- [ ] Mode-selection unit tests over a table of (stdin is a terminal,
-      `DISPLAY`, `WAYLAND_DISPLAY`, flags) → mode.
-- [ ] The full installer and the `--cli-only` installer come from one
-      `fynstall build` call with both outputs requested.
-- [ ] Headless probe: the full installer run in a container with no
+- [x] The GUI builds the page sequence from the manifest: Welcome, Licence
+      (if set), Settings (parameters, if any), Location, Ready (the plan,
+      R6), Installing (engine events), Done (launch check if set). Scope
+      and Components wait for phase 5 and for components. The GUI is in
+      package `installer` behind the `!nogui` tag rather than in a
+      `ui/gui` package, which avoids an import cycle and keeps the
+      CLI-only build free of Fyne. `TestTheWizardInstallsWithItsParameters`
+      drives a full install into a temp `HOME` with `wizard.Headless`;
+      `TestTheWizardHoldsInstallWhenThePlanCannotBeMade` and
+      `TestAnInstalledProgramGetsItsOwnUninstallerOffered` cover the rest.
+- [x] Mode-selection unit tests over a table of (stdin is a terminal,
+      `DISPLAY`, `WAYLAND_DISPLAY`, flags) → mode (`TestChooseMode`). A
+      CLI-only flag such as `--yes` means the CLI; `--gui` without a
+      display is an error, not a Fyne crash.
+- [x] The full installer and the `--cli-only` installer come from one
+      `fynstall build` call with both outputs requested (`--with-cli-only`;
+      `TestOneBuildMakesTheFullAndTheCLIVariant`). The full variant builds
+      only for this machine, because it needs cgo, and says so for another
+      target.
+- [x] Headless probe: the full installer run in a container with no
       libGL or X11 libraries. The result is recorded: it fails to start, or
       it starts in CLI mode. The README states which. The `--cli-only`
-      installer installs successfully in the same container.
-- [ ] Desk check: double-click the installer in Dolphin and the wizard
+      installer installs successfully in the same container. In
+      `debian:stable-slim` the full installer does not start
+      (`libGL.so.1: cannot open shared object file`, exit 127, even for
+      `--version`), and the CLI variant installs and uninstalls.
+- [x] Desk check: double-click the installer in Dolphin and the wizard
       opens. Run it from Konsole and the CLI runs. `--gui` from Konsole
       opens the wizard. Cancel during the progress page leaves no files.
       Launch now on the finish page starts Hello.
-- [ ] When the config declares parameters (spec 002 D3a), the wizard has a
+- [x] When the config declares parameters (spec 002 D3a), the wizard has a
       page for them, generated with fynedesygn `forms`, and a secret is a
-      password entry.
+      password entry. A required one holds Next until it is filled
+      (`TestTheWizardInstallsWithItsParameters`).
+- [x] A full build's launcher entry has an Uninstall action that runs the
+      installed uninstaller's wizard (R9c), and passes
+      `desktop-file-validate` (`TestTheFullInstallerRunsAsTheCLIWithoutADisplay`).
+      The full installer, run with no display, installs as the CLI.
+- [x] The uninstaller asks once in a small window (fynedesygn v0.1.92,
+      `wizard.RunConfirm`), and `--yes` skips the question. On the command
+      line it does not ask (`TestTheUninstallerAsksOnceThenRemoves`,
+      `TestTheCLIUninstallerRemovesWithoutAsking`). Changed at the desk:
+      the first version was a three-page wizard and a y/N prompt.
+- [x] An uninstaller that is not inside an install (the copy in `dist/`)
+      hands over to the installed one through the index, or says the
+      program is not installed. Started from the desktop, it shows problems
+      in a window (`TestTheUninstallerInDistHandsOverToTheInstalledOne`).
+      Found at the desk: a double-click on the `dist/` copy failed with an
+      error on stderr only, and nothing on screen.
+- [x] Installing shows a bar, the count of files and bytes and the file
+      being written (fynedesygn v0.1.92, `WithBar`); a terminal gets one
+      progress line, a pipe none. The engine reports every file, and inside
+      a large file every MiB (`TestProgressCountsEveryFileAndByteAndMovesInsideALargeFile`,
+      `TestTheProgressLineIsForTerminalsOnly`). A payload of 5,001 files
+      builds in about 0.5 s, installs in about 0.3 s and uninstalls to an
+      unchanged home (`TestThousandsOfFilesInstallAndUninstall`).
 
 ### Phase 5: system scope on Linux (R13, R14)
 
@@ -609,6 +645,44 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 4 (2026-10-08)
+
+Same machine. `make test` (with `-race`), `make lint` (0 issues) and
+`govulncheck` pass. fynedesygn v0.1.94.
+
+- In `debian:stable-slim` the full installer does not start
+  (`libGL.so.1: cannot open shared object file`, exit 127); the CLI
+  variant installs and uninstalls.
+- The desk check found three problems, each fixed in this phase:
+  - The uninstaller beside the installer in `dist/`, double-clicked, failed
+    with an error on stderr only and showed nothing. It now hands over to
+    the installed uninstaller, or says the program is not installed, in a
+    window.
+  - The uninstaller was a three-page wizard and the CLI asked y/N. The user
+    asked for one question in the window and none on the command line:
+    fynedesygn spec 062 added `wizard.RunConfirm`, and `--yes` skips the
+    question.
+  - Installing 20,000 files made the fixed-size window grow from 820 px to
+    977 px in steps. A real-window probe traced it to the log pane's line
+    counter ("1000 line(s), 19000 older dropped"). fynedesygn spec 065
+    (v0.1.94) fixed it; the same probe then showed the window at 820 px for
+    the whole job. A first explanation, the wrapped log rows, was measured
+    and dropped.
+- After the fixes, the user reports:
+  - the Hello installer from Dolphin, with Launch now, starting Hello;
+  - Uninstall Hello from the launcher, asking once and reporting;
+  - the `dist/` uninstaller with nothing installed showing "not installed";
+  - the 20,000-file installer counting to the end with no movement of the
+    window;
+  - its CLI uninstaller removing 20,001 files without asking, in 182 ms.
+- Afterwards, the listings of `~/.local/share`, `~/.config`, `~/.local/bin`
+  and `~/.local/share/applications` matched those taken before.
+- A real CPython 3.14 runtime (10,505 files, 288 MB, 54 symlinks) could not
+  be packaged because of its symlinks. A dereferenced copy built in 1.5 s
+  into a 275 MB installer (the linker stores identical files once),
+  installed in 1.5 s and ran. Its uninstaller left the `.pyc` files Python
+  wrote at runtime. Symlinks and the leftovers policy go to spec 002.
 
 ### Phase 3 (2026-10-08)
 

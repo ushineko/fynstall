@@ -16,10 +16,6 @@ import (
 	"github.com/ushineko/fynstall/platform"
 )
 
-// guiAvailable is false in this build: the GUI front end arrives in spec
-// 001 phase 4, and a --cli-only installer never has one (R12).
-const guiAvailable = false
-
 type installFlags struct {
 	cli, gui, yes, dryRun, uninstall, forceReceipt, verbose, version bool
 	dir, scope                                                       string
@@ -62,12 +58,20 @@ func Install(args []string, p Payload, e Env) int {
 		_, _ = fmt.Fprintf(e.Err, "This installer's payload is for %s, but the installer was built for %s. Rebuild it.\n", m.Target, built)
 		return exitFail
 	}
-	if f.gui && !guiAvailable {
-		_, _ = fmt.Fprintln(e.Err, "This installer was built without the wizard (--cli-only). Run it without --gui.")
-		return exitUsage
-	}
 	if f.scope == "" {
 		f.scope = m.Scopes[0]
+	}
+	md, err := chooseMode(modeInput{
+		wantGUI: f.gui, wantCLI: f.cli, available: guiAvailable,
+		cliOnly:     f.yes || f.dryRun || f.uninstall || f.forceReceipt,
+		interactive: e.Interactive, display: hasDisplay(e.Getenv),
+	})
+	if err != nil {
+		_, _ = fmt.Fprintln(e.Err, err)
+		return exitUsage
+	}
+	if md == modeGUI {
+		return installGUI(m, p, f, e)
 	}
 
 	ix, ixPath, err := engine.ReadIndex(m, f.scope, e.Getenv)
@@ -152,6 +156,11 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 	if plan.RefreshMenu {
 		refreshMenu(report)
 	}
+	var size int64
+	for _, pf := range plan.Files {
+		size += pf.Size
+	}
+	_, _ = fmt.Fprintf(e.Out, "Copied %s files (%s).\n", thousands(len(plan.Files)), humanSize(size))
 	_, _ = fmt.Fprintf(e.Out, "Installed %s %s in %s.\nTo remove it, run %s/%s.\n", m.App.Name, m.App.Version, plan.Root, plan.Root, engine.UninstallName)
 	if len(plan.Links) > 0 {
 		if bin := filepath.Dir(plan.Links[0].Dst); !onPath(bin, e.Getenv("PATH")) {

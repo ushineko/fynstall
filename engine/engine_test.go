@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -291,4 +292,32 @@ func TestAConfigFileInAKeptPathSurvivesTheUninstall(t *testing.T) {
 	require.Equal(t, "{\n  \"a\": \"b\"\n}\n", string(b))
 	_, err = os.Stat(f.root())
 	require.True(t, errors.Is(err, os.ErrNotExist), "everything else is gone")
+}
+
+func TestProgressCountsEveryFileAndByteAndMovesInsideALargeFile(t *testing.T) {
+	f := newFixture(t)
+	f.add("share/big.bin", strings.Repeat("x", 3*progressStep+5), 0o644)
+	p, err := NewPlan(f.m, Options{Env: f.env, Uninstaller: []byte("uninstaller")})
+	require.NoError(t, err)
+	var events []Event
+	_, err = Apply(context.Background(), p, f.payload, []byte("uninstaller"), func(ev Event) {
+		if ev.Kind == Progress {
+			events = append(events, ev)
+		}
+	})
+	require.NoError(t, err)
+
+	var total int64
+	for _, pf := range p.Files {
+		total += pf.Size
+	}
+	last := events[len(events)-1].Counts
+	require.Equal(t, Counts{Files: len(p.Files), FilesTotal: len(p.Files), Bytes: total, BytesTotal: total}, last)
+	inside := 0
+	for _, ev := range events {
+		if strings.HasSuffix(ev.Text, "big.bin") && ev.Counts.Files < 3 {
+			inside++
+		}
+	}
+	require.GreaterOrEqual(t, inside, 3, "the bar moves while a large file is copied")
 }

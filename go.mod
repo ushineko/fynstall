@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	fyne.io/fyne/v2 v2.8.1
 	github.com/stretchr/testify v1.12.1
-	github.com/ushineko/fynedesygn v0.1.91
+	github.com/ushineko/fynedesygn v0.1.94
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/image v0.46.0
 	golang.org/x/sys v0.48.0

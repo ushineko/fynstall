@@ -25,6 +25,7 @@ the Windows Uninstall registry entry, have no keys of their own.
 - [integration](#integration)
 - [parameters](#parameters)
 - [actions](#actions)
+- [ui](#ui)
 - [targets](#targets)
 - [Placeholders](#placeholders)
 - [What an install writes](#what-an-install-writes)
@@ -38,6 +39,7 @@ the Windows Uninstall registry entry, have no keys of their own.
 | `version` | yes | A version such as `1.2.3` or `1.2.3-rc.1`. |
 | `publisher` | no | Who makes the program. |
 | `icon` | no | A square PNG of at least 512 px, relative to `fynstall.yaml`. |
+| `licence` | no | A text or Markdown file. The wizard shows it, and the install goes on only once it is accepted. |
 
 The build resizes the icon to 16, 32, 48, 64, 128, 256 and 512 px. Each
 size is installed into the hicolor icon theme under the app ID. KDE uses
@@ -210,6 +212,15 @@ installer does not run the program to produce one.
 - The uninstaller removes the file unless its path is under
   `keep_on_uninstall`. Keep it when the configuration must outlive an
   uninstall, or an upgrade, which runs the old uninstaller first.
+
+## ui
+
+What the wizard shows.
+
+| Key | Meaning |
+|---|---|
+| `welcome` | A Markdown file for the first page. Without it, the page says what is installed, by whom, and that it needs no administrator rights. |
+| `launch` | A payload destination that the finish page offers to start. It can use `{os}`, `{arch}` and `{exe}`. |
 
 ## targets
 

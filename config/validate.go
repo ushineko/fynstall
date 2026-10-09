@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 
@@ -130,6 +131,13 @@ func validate(c *Config, root *yaml.Node) Errors {
 	k.desktop(c)
 	k.parameters(c)
 	k.actions(c)
+	k.textFile(c, c.App.Licence, "app.licence", "app", "licence")
+	k.textFile(c, c.UI.Welcome, "ui.welcome", "ui", "welcome")
+	if c.UI.Launch != "" && !k.buildTemplate(c.UI.Launch, "ui.launch", "ui", "launch") {
+		if msg := CheckDst(c.UI.Launch); msg != "" {
+			k.fail(k.line("ui", "launch"), "ui.launch", "%s", msg)
+		}
+	}
 	for i, p := range c.Integration.KeepOnUninstall {
 		k.template(p, "integration.keep_on_uninstall", "integration", "keep_on_uninstall", i)
 	}
@@ -301,6 +309,23 @@ func (k *checker) desktop(c *Config) {
 				k.fail(k.line("integration", "desktop", i, "categories", j), field+".categories", "%q is not a category name", cat)
 			}
 		}
+	}
+}
+
+// textFile checks that a text file the wizard shows exists, is not huge,
+// and is UTF-8.
+func (k *checker) textFile(c *Config, rel, field string, keys ...any) {
+	if rel == "" {
+		return
+	}
+	b, err := os.ReadFile(filepath.Join(c.Dir, filepath.FromSlash(rel)))
+	switch {
+	case err != nil:
+		k.fail(k.line(keys...), field, "%s does not exist", rel)
+	case len(b) > 256<<10:
+		k.fail(k.line(keys...), field, "%s is larger than 256 KiB", rel)
+	case !utf8.Valid(b):
+		k.fail(k.line(keys...), field, "%s is not UTF-8 text", rel)
 	}
 }
 

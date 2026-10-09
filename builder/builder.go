@@ -21,6 +21,7 @@ import (
 
 	"github.com/ushineko/fynstall/config"
 	"github.com/ushineko/fynstall/internal/version"
+	"github.com/ushineko/fynstall/manifest"
 )
 
 // RuntimeModule is the module every generated program imports.
@@ -34,8 +35,11 @@ type Options struct {
 	OutDir string
 	// Targets override the config's targets; both empty means this host.
 	Targets []string
-	// CLIOnly builds without Fyne or cgo (R12). Phase 1 builds nothing else.
+	// CLIOnly builds only the CLI variant: no Fyne, no cgo (R12). Without
+	// it the build makes the full variant, with the wizard.
 	CLIOnly bool
+	// WithCLIOnly builds the CLI variant as well as the full one.
+	WithCLIOnly bool
 	// RuntimePath, when set, is a local fynstall checkout the generated
 	// programs use through a replace directive, instead of a released
 	// version (R5).
@@ -51,18 +55,17 @@ type Options struct {
 	Log io.Writer
 }
 
-// Artifact is what one target produced.
+// Artifact is what one target and variant produced.
 type Artifact struct {
-	Target      string
+	Target string
+	// GUI is true for the full variant, with the wizard.
+	GUI         bool
 	Installer   string
 	Uninstaller string
 }
 
 // Build builds an installer and an uninstaller for each target.
 func Build(ctx context.Context, o Options) ([]Artifact, error) {
-	if !o.CLIOnly {
-		return nil, errors.New("only --cli-only installers can be built so far; the wizard arrives in spec 001 phase 4")
-	}
 	c, err := config.Load(o.Config)
 	if err != nil {
 		return nil, err
@@ -97,6 +100,22 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 			return nil, fmt.Errorf("target %s: Windows arrives in spec 001 phase 7", t)
 		}
 	}
+	var variants []bool
+	if !o.CLIOnly {
+		variants = append(variants, true)
+	}
+	if o.CLIOnly || o.WithCLIOnly {
+		variants = append(variants, false)
+	}
+	host := runtime.GOOS + "/" + runtime.GOARCH
+	if variants[0] {
+		for _, t := range targets {
+			if t != host {
+				return nil, fmt.Errorf("target %s: the wizard needs cgo, so a full installer builds only for this machine (%s); build other targets with --cli-only", t, host)
+			}
+		}
+	}
+
 	mod, err := moduleFiles(o)
 	if err != nil {
 		return nil, err
@@ -114,26 +133,33 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 		if err != nil {
 			return nil, err
 		}
-		manifestJSON, err := m.Marshal()
-		if err != nil {
-			return nil, err
-		}
 		goos, goarch, _ := strings.Cut(t, "/")
 		base := fmt.Sprintf("%s-%s-%s-%s", m.App.Basename(), m.App.Version, goos, goarch)
-		a := Artifact{
-			Target:      t,
-			Installer:   filepath.Join(o.OutDir, base+"-installer"),
-			Uninstaller: filepath.Join(o.OutDir, base+"-uninstaller"),
+		for _, gui := range variants {
+			m.GUI = gui
+			manifestJSON, err := m.Marshal()
+			if err != nil {
+				return nil, err
+			}
+			name := base
+			if !gui {
+				name += "-cli"
+			}
+			a := Artifact{
+				Target: t, GUI: gui,
+				Installer:   filepath.Join(o.OutDir, name+"-installer"),
+				Uninstaller: filepath.Join(o.OutDir, name+"-uninstaller"),
+			}
+			if err := buildTarget(ctx, o, mod, goos, goarch, m.App, manifestJSON, files, generated, a); err != nil {
+				return nil, fmt.Errorf("target %s: %w", t, err)
+			}
+			out = append(out, a)
 		}
-		if err := buildTarget(ctx, o, mod, goos, goarch, manifestJSON, files, generated, a); err != nil {
-			return nil, fmt.Errorf("target %s: %w", t, err)
-		}
-		out = append(out, a)
 	}
 	return out, nil
 }
 
-func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, goarch string, manifestJSON []byte, files []staged, generated map[string][]byte, a Artifact) error {
+func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, goarch string, app manifest.App, manifestJSON []byte, files []staged, generated map[string][]byte, a Artifact) error {
 	work, err := os.MkdirTemp("", "fynstall-build-*")
 	if err != nil {
 		return fmt.Errorf("create work directory: %w", err)
@@ -141,10 +167,11 @@ func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, go
 	defer func() { _ = os.RemoveAll(work) }()
 
 	un := filepath.Join(work, "uninstaller")
-	if err := writeTree(un, mod, map[string][]byte{"main.go": []byte(uninstallerMain)}); err != nil {
+	unMain := fmt.Sprintf(uninstallerMain, app.ID, app.Name, app.Version)
+	if err := writeTree(un, mod, map[string][]byte{"main.go": []byte(unMain)}); err != nil {
 		return err
 	}
-	if err := goBuild(ctx, o, un, goos, goarch, a.Uninstaller); err != nil {
+	if err := goBuild(ctx, o, un, goos, goarch, a.GUI, a.Uninstaller); err != nil {
 		return fmt.Errorf("build uninstaller: %w", err)
 	}
 	unBytes, err := os.ReadFile(a.Uninstaller)
@@ -176,7 +203,7 @@ func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, go
 			return fmt.Errorf("stage %s: %w", p, err)
 		}
 	}
-	if err := goBuild(ctx, o, in, goos, goarch, a.Installer); err != nil {
+	if err := goBuild(ctx, o, in, goos, goarch, a.GUI, a.Installer); err != nil {
 		return fmt.Errorf("build installer: %w", err)
 	}
 	return nil
@@ -210,25 +237,35 @@ func moduleFiles(o Options) (map[string][]byte, error) {
 	return files, nil
 }
 
-func goBuild(ctx context.Context, o Options, dir, goos, goarch, out string) error {
+// goBuild builds the program in dir. The full variant is built with cgo
+// and Fyne; the CLI variant with neither, under the nogui tag (R12).
+func goBuild(ctx context.Context, o Options, dir, goos, goarch string, gui bool, out string) error {
 	abs, err := filepath.Abs(out)
 	if err != nil {
 		return fmt.Errorf("output path: %w", err)
 	}
 	if o.RuntimePath == "" {
-		if err := goCmd(ctx, o, dir, goos, goarch, "mod", "tidy"); err != nil {
+		if err := goCmd(ctx, o, dir, goos, goarch, gui, "mod", "tidy"); err != nil {
 			return err
 		}
 	}
 	ldflags := fmt.Sprintf("-s -w -buildid= -X %s/internal/version.Version=%s", RuntimeModule, o.RuntimeVersion)
-	return goCmd(ctx, o, dir, goos, goarch, "build", "-trimpath", "-buildvcs=false", "-tags", "nogui", "-ldflags", ldflags, "-o", abs, ".")
+	args := []string{"build", "-trimpath", "-buildvcs=false"}
+	if !gui {
+		args = append(args, "-tags", "nogui")
+	}
+	return goCmd(ctx, o, dir, goos, goarch, gui, append(args, "-ldflags", ldflags, "-o", abs, ".")...)
 }
 
-func goCmd(ctx context.Context, o Options, dir, goos, goarch string, args ...string) error {
+func goCmd(ctx context.Context, o Options, dir, goos, goarch string, gui bool, args ...string) error {
 	cmd := exec.CommandContext(ctx, o.Go, args...) // #nosec G204 -- the go command and fixed arguments
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), o.Env...)
-	cmd.Env = append(cmd.Env, "CGO_ENABLED=0", "GOOS="+goos, "GOARCH="+goarch, "GOWORK=off", "GOFLAGS=-mod=mod")
+	cgo := "CGO_ENABLED=0"
+	if gui {
+		cgo = "CGO_ENABLED=1"
+	}
+	cmd.Env = append(cmd.Env, cgo, "GOOS="+goos, "GOARCH="+goarch, "GOWORK=off", "GOFLAGS=-mod=mod")
 	var stderr bytes.Buffer
 	cmd.Stdout = o.Log
 	cmd.Stderr = io.MultiWriter(o.Log, &stderr)
@@ -268,13 +305,22 @@ func copyPayload(src, dst string) error {
 	return nil
 }
 
+// uninstallerMain is the uninstaller's main package. It carries the app's
+// identity, so a copy that is not inside an install (the one beside the
+// installer in dist/) can find the install and hand over to its own
+// uninstaller. The values are Go-quoted with %q.
 const uninstallerMain = `// Code generated by fynstall. DO NOT EDIT.
 
 package main
 
-import "github.com/ushineko/fynstall/installer"
+import (
+	"github.com/ushineko/fynstall/installer"
+	"github.com/ushineko/fynstall/manifest"
+)
 
-func main() { installer.UninstallMain() }
+func main() {
+	installer.UninstallMain(manifest.App{ID: %q, Name: %q, Version: %q})
+}
 `
 
 const installerMain = `// Code generated by fynstall. DO NOT EDIT.

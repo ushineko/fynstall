@@ -40,6 +40,8 @@ const (
 )
 
 var (
+	full       builder.Artifact // examples/hello with the wizard
+	fullCLI    builder.Artifact // the CLI variant from the same build
 	greetAMD64 builder.Artifact
 	greetARM64 builder.Artifact
 	src        string // the staged copy of examples/hello: config, README, bin/hello
@@ -70,7 +72,7 @@ func setup(work string) error {
 	if err := os.MkdirAll(filepath.Join(src, "bin"), 0o750); err != nil {
 		return err
 	}
-	for _, f := range []string{"fynstall.yaml", "README.md", "hello.png"} {
+	for _, f := range []string{"fynstall.yaml", "README.md", "hello.png", "LICENSE"} {
 		b, err := os.ReadFile(filepath.Join(repo, "examples", "hello", f))
 		if err != nil {
 			return err
@@ -103,6 +105,18 @@ func setup(work string) error {
 	if v2Art, err = build(v2, "v2"); err != nil {
 		return err
 	}
+	// The full variant needs cgo and Fyne, as examples/hello itself does.
+	arts, err := builder.Build(context.Background(), builder.Options{
+		Config: filepath.Join(src, "fynstall.yaml"), OutDir: filepath.Join(work, "full"),
+		WithCLIOnly: true, RuntimePath: repo, RuntimeVersion: v1, Env: []string{"GOPROXY=off"},
+	})
+	if err != nil {
+		return err
+	}
+	if len(arts) != 2 || !arts[0].GUI || arts[1].GUI {
+		return fmt.Errorf("full build: want the full variant then the CLI one, got %+v", arts)
+	}
+	full, fullCLI = arts[0], arts[1]
 	return setupGreet(repo, work)
 }
 
@@ -516,4 +530,134 @@ func TestASecretNeverLeavesTheConfigFile(t *testing.T) {
 	for _, o := range outputs {
 		require.NotContains(t, o, secret)
 	}
+}
+
+func TestOneBuildMakesTheFullAndTheCLIVariant(t *testing.T) {
+	require.NoError(t, setupFail)
+	require.True(t, strings.HasSuffix(full.Installer, "-installer") && !strings.HasSuffix(full.Installer, "-cli-installer"), full.Installer)
+	require.True(t, strings.HasSuffix(fullCLI.Installer, "-cli-installer"), fullCLI.Installer)
+	libs := func(p string) []string {
+		f, err := elf.Open(p)
+		require.NoError(t, err)
+		defer func() { _ = f.Close() }()
+		l, err := f.ImportedLibraries()
+		require.NoError(t, err)
+		return l
+	}
+	require.NotEmpty(t, libs(full.Installer), "the wizard links the graphics libraries")
+	require.Empty(t, libs(fullCLI.Installer))
+	require.Empty(t, libs(fullCLI.Uninstaller))
+}
+
+func TestTheFullInstallerRunsAsTheCLIWithoutADisplay(t *testing.T) {
+	require.NoError(t, setupFail)
+	h := newHome(t)
+	before := h.snap(t)
+
+	code, out := h.run(t, full.Installer, "--gui")
+	require.Equal(t, 2, code)
+	require.Contains(t, out, "needs a display")
+
+	code, out = h.run(t, full.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	entry, err := os.ReadFile(h.data("applications/io.ushineko.hello.desktop"))
+	require.NoError(t, err)
+	require.Contains(t, string(entry), "Exec="+filepath.Join(h.root, "uninstall")+" --gui\n", "the full variant's launcher entry has the Uninstall action")
+	if tool, err := exec.LookPath("desktop-file-validate"); err == nil {
+		out, err := exec.CommandContext(t.Context(), tool, h.data("applications/io.ushineko.hello.desktop")).CombinedOutput()
+		require.NoError(t, err, string(out))
+		require.Empty(t, strings.TrimSpace(string(out)))
+	}
+	require.Equal(t, sum(t, full.Uninstaller), sum(t, filepath.Join(h.root, "uninstall")))
+
+	code, out = h.run(t, filepath.Join(h.root, "uninstall"), "--yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
+}
+
+// The uninstaller beside the installer in dist/ is not inside an install.
+// Double-clicked there, it must not fail silently: it hands over to the
+// installed copy, or says there is nothing to remove.
+func TestTheUninstallerInDistHandsOverToTheInstalledOne(t *testing.T) {
+	require.NoError(t, setupFail)
+	h := newHome(t)
+	before := h.snap(t)
+
+	code, out := h.run(t, v1Art.Uninstaller, "--yes")
+	require.Equal(t, 1, code)
+	require.Contains(t, out, "Hello is not installed for this user")
+
+	code, out = h.run(t, v1Art.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	code, out = h.run(t, v1Art.Uninstaller, "--yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, 2, strings.Count(out, "fynstall uninstaller "+v1), "the dist copy, then the installed one it ran")
+	require.Contains(t, out, "Removed Hello")
+	require.Equal(t, before, h.snap(t))
+}
+
+func TestTheCLIUninstallerRemovesWithoutAsking(t *testing.T) {
+	require.NoError(t, setupFail)
+	h := newHome(t)
+	before := h.snap(t)
+	code, out := h.run(t, v1Art.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	code, out = h.run(t, filepath.Join(h.root, "uninstall")) // no --yes, no terminal
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "Removed Hello")
+	require.Equal(t, before, h.snap(t))
+}
+
+// An installer of thousands of files, as one that bundles a Python runtime
+// is: it builds, installs every file with the right totals, and its
+// uninstaller leaves the home as it was.
+func TestThousandsOfFilesInstallAndUninstall(t *testing.T) {
+	require.NoError(t, setupFail)
+	if testing.Short() {
+		t.Skip("builds and installs 5,001 files")
+	}
+	const files = 5000
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "lib")
+	for i := range files {
+		p := filepath.Join(lib, fmt.Sprintf("pkg%02d", i%50), fmt.Sprintf("module_%04d.py", i))
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o750))
+		require.NoError(t, os.WriteFile(p, []byte(fmt.Sprintf("# module %d\nVALUE = %d\n", i, i)), 0o600))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(lib, "big.bin"), bytes.Repeat([]byte{7}, 8<<20), 0o600))
+	cfg := "app:\n  id: io.example.many\n  name: Many\n  version: 1.0.0\npayload:\n  - src: lib/\n    dst: lib/\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fynstall.yaml"), []byte(cfg), 0o600))
+	repo, err := filepath.Abs("..")
+	require.NoError(t, err)
+
+	start := time.Now()
+	arts, err := builder.Build(t.Context(), builder.Options{
+		Config: filepath.Join(dir, "fynstall.yaml"), OutDir: filepath.Join(dir, "dist"),
+		CLIOnly: true, RuntimePath: repo, RuntimeVersion: v1, Env: []string{"GOPROXY=off"},
+	})
+	require.NoError(t, err)
+	t.Logf("build: %s", time.Since(start).Round(time.Millisecond))
+
+	h := newHome(t)
+	h.root = filepath.Join(h.dir, ".local", "share", "io.example.many")
+	before := h.snap(t)
+	start = time.Now()
+	code, out := h.run(t, arts[0].Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	t.Logf("install: %s", time.Since(start).Round(time.Millisecond))
+	require.Contains(t, out, "Copied 5,002 files", "5,000 modules, big.bin and the uninstaller")
+	n := 0
+	require.NoError(t, filepath.WalkDir(filepath.Join(h.root, "lib"), func(_ string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			n++
+		}
+		return err
+	}))
+	require.Equal(t, files+1, n)
+
+	start = time.Now()
+	code, out = h.run(t, filepath.Join(h.root, "uninstall"))
+	require.Equal(t, 0, code, out)
+	t.Logf("uninstall: %s", time.Since(start).Round(time.Millisecond))
+	require.Equal(t, before, h.snap(t))
 }

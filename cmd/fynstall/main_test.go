@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -40,8 +41,14 @@ func TestInitWritesAConfigAndRefusesToOverwriteIt(t *testing.T) {
 	require.Equal(t, 1, strings.Count(strings.TrimSpace(errOut.String()), "\n")+1, errOut.String())
 }
 
-func TestBuildWithoutCLIOnlyNamesThePhaseThatAddsTheWizard(t *testing.T) {
+func TestAFullBuildForAnotherTargetSaysTheWizardNeedsCgo(t *testing.T) {
+	other := "linux/arm64"
+	if runtime.GOARCH == "arm64" {
+		other = "linux/amd64"
+	}
 	var out, errOut bytes.Buffer
-	require.Equal(t, 1, run(context.Background(), []string{"build", "-c", "../../examples/hello/fynstall.yaml"}, &out, &errOut))
-	require.Contains(t, errOut.String(), "phase 4")
+	code := run(context.Background(), []string{"build", "-c", "../../examples/hello/fynstall.yaml", "-o", t.TempDir(), "--target", other}, &out, &errOut)
+	require.Equal(t, 1, code)
+	require.Contains(t, errOut.String(), "the wizard needs cgo")
+	require.Contains(t, errOut.String(), "--cli-only")
 }

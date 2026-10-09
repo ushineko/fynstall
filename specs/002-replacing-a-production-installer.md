@@ -424,8 +424,8 @@ Phase 2, parameters (CLI part; the wizard page lands with spec 001 phase 4):
       uninstall appears in no output and in no file but its config file
       (`TestASecretNeverLeavesTheConfigFile`). A mutation that recorded
       secrets in the receipt failed it.
-- [ ] The wizard has a parameters page, with secrets as password entries
-      (spec 001 phase 4).
+- [x] The wizard has a parameters page, with secrets as password entries
+      (spec 001 phase 4, `TestTheWizardInstallsWithItsParameters`).
 - [x] Desk check: a CLI install that takes a value from each source, with
       a secret typed at a prompt, and shows them in the written config
       file. Flag, file and prompt in one run; the default is covered by

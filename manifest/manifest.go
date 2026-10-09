@@ -48,6 +48,14 @@ type Manifest struct {
 	Parameters []Parameter `json:"parameters,omitempty"`
 	// ConfigFiles are written from parameters at install time.
 	ConfigFiles []ConfigFile `json:"config_files,omitempty"`
+	// Licence and Welcome are the texts the wizard shows.
+	Licence string `json:"licence,omitempty"`
+	Welcome string `json:"welcome,omitempty"`
+	// Launch is the payload file the finish page offers to start.
+	Launch string `json:"launch,omitempty"`
+	// GUI is true when the installer and its uninstaller have the wizard.
+	// The launcher then gets an Uninstall action, which needs no terminal.
+	GUI bool `json:"gui,omitempty"`
 }
 
 // Parameter is a declared parameter (spec 002 D3a). A manifest holds the

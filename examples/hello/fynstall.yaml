@@ -6,6 +6,7 @@ app:
   version: 0.1.0
   publisher: ushineko
   icon: hello.png
+  licence: LICENSE
 
 install:
   scopes: [user]
@@ -17,6 +18,9 @@ payload:
     dst: bin/hello
   - src: README.md
     dst: share/doc/README.md
+
+ui:
+  launch: bin/hello      # the finish page offers to start it
 
 integration:
   path_links: [bin/hello]
