@@ -50,7 +50,11 @@ type Receipt struct {
 	Index          string       `json:"index"`
 	Keep           []string     `json:"keep_on_uninstall,omitempty"`
 	RefreshMenu    bool         `json:"refresh_menu,omitempty"`
-	Journal        []Entry      `json:"journal"`
+	// Parameters are the non-secret values the install used, which an
+	// upgrade reads back (spec 002 D3a). Secrets are named, never stored.
+	Parameters map[string]string `json:"parameters,omitempty"`
+	Secrets    []string          `json:"secrets,omitempty"`
+	Journal    []Entry           `json:"journal"`
 }
 
 // Index is the install index entry: where to find an install of an app.

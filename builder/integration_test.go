@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -413,4 +414,106 @@ func TestTheArm64InstallerInstallsUnderEmulation(t *testing.T) {
 	code, out = h.run(t, qemu, filepath.Join(h.root, "uninstall"), "--yes")
 	require.Equal(t, 0, code, out)
 	require.Equal(t, before, h.snap(t))
+}
+
+// greetCopy puts the amd64 greet installer in a directory of its own, so a
+// test can put a parameter file beside it.
+func greetCopy(t *testing.T, side string) string {
+	t.Helper()
+	dir := t.TempDir()
+	b, err := os.ReadFile(greetAMD64.Installer)
+	require.NoError(t, err)
+	dst := filepath.Join(dir, filepath.Base(greetAMD64.Installer))
+	require.NoError(t, os.WriteFile(dst, b, 0o700)) // #nosec G306 -- a test copy that must run
+	if side != "" {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "fynstall-params.yml"), []byte(side), 0o600))
+	}
+	return dst
+}
+
+func TestParametersComeFromAFlagThenTheSideFileThenTheDefault(t *testing.T) {
+	require.NoError(t, setupFail)
+	if runtime.GOARCH != "amd64" {
+		t.Skip("runs the amd64 installer natively")
+	}
+	h := greetHome(t)
+	before := h.snap(t)
+	installer := greetCopy(t, "name: from-the-file\ntoken: file-token\n")
+
+	code, out := h.run(t, installer, "--yes", "--token=flag-token")
+	require.Equal(t, 0, code, out)
+	b, err := os.ReadFile(filepath.Join(h.dir, ".config", "io.ushineko.greet", "config.json"))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"greeting":"hello","name":"from-the-file","token":"flag-token"}`, string(b),
+		"greeting from the default, name from the file, token from the flag over the file")
+	cmd := exec.CommandContext(t.Context(), filepath.Join(h.root, "bin", "greet"))
+	cmd.Env = []string{"HOME=" + h.dir}
+	got, err := cmd.Output()
+	require.NoError(t, err)
+	require.Equal(t, "hello from linux/amd64, from-the-file (with a token)\n", string(got), "the program reads what the installer wrote")
+
+	code, out = h.run(t, filepath.Join(h.root, "uninstall"), "--yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
+}
+
+func TestASideFileWithAnUnknownNameIsRefused(t *testing.T) {
+	require.NoError(t, setupFail)
+	if runtime.GOARCH != "amd64" {
+		t.Skip("runs the amd64 installer natively")
+	}
+	h := greetHome(t)
+	before := h.snap(t)
+	code, out := h.run(t, greetCopy(t, "greting: typo\n"), "--yes")
+	require.Equal(t, 2, code)
+	require.Contains(t, out, "greting is not a parameter of this installer")
+	require.Equal(t, before, h.snap(t))
+}
+
+// A secret goes in by flag and must come out only in the config file it was
+// meant for: not in any output, the receipt, the index or anything else.
+func TestASecretNeverLeavesTheConfigFile(t *testing.T) {
+	require.NoError(t, setupFail)
+	if runtime.GOARCH != "amd64" {
+		t.Skip("runs the amd64 installer natively")
+	}
+	secret := fmt.Sprintf("SECRET-%d", time.Now().UnixNano())
+	h := greetHome(t)
+	installer := greetCopy(t, "")
+	var outputs []string
+	for _, args := range [][]string{
+		{"--dry-run", "--token=" + secret},
+		{"--yes", "--verbose", "--token=" + secret},
+	} {
+		code, out := h.run(t, installer, args...)
+		require.Equal(t, 0, code, out)
+		outputs = append(outputs, out)
+	}
+	config := filepath.Join(h.dir, ".config", "io.ushineko.greet", "config.json")
+	b, err := os.ReadFile(config)
+	require.NoError(t, err)
+	require.Contains(t, string(b), secret, "the one place it belongs")
+	fi, err := os.Stat(config)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
+
+	err = filepath.WalkDir(h.dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || p == config {
+			return err
+		}
+		c, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		require.NotContains(t, string(c), secret, "%s holds the secret", p)
+		return nil
+	})
+	require.NoError(t, err)
+
+	code, out := h.run(t, filepath.Join(h.root, "uninstall"), "--yes", "--verbose")
+	require.Equal(t, 0, code, out)
+	outputs = append(outputs, out)
+	for _, o := range outputs {
+		require.NotContains(t, o, secret)
+	}
 }

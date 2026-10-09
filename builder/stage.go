@@ -106,6 +106,16 @@ func stage(c *config.Config, runtimeVersion, target string) (*manifest.Manifest,
 	for _, f := range files {
 		m.Files = append(m.Files, f.File)
 	}
+	for _, p := range c.Parameters {
+		m.Parameters = append(m.Parameters, manifest.Parameter(p))
+	}
+	for _, a := range c.Actions {
+		if a.ConfigFile != nil {
+			m.ConfigFiles = append(m.ConfigFiles, manifest.ConfigFile{
+				Path: a.ConfigFile.Path, Format: config.FileFormat(a.ConfigFile), Values: a.ConfigFile.Values,
+			})
+		}
+	}
 	if err := integrate(c, m, seen, expand); err != nil {
 		return nil, nil, nil, err
 	}

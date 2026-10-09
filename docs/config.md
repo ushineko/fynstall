@@ -23,6 +23,8 @@ the Windows Uninstall registry entry, have no keys of their own.
 - [install](#install)
 - [payload](#payload)
 - [integration](#integration)
+- [parameters](#parameters)
+- [actions](#actions)
 - [targets](#targets)
 - [Placeholders](#placeholders)
 - [What an install writes](#what-an-install-writes)
@@ -152,6 +154,62 @@ if it is on `PATH`, so KDE shows the change without a new login. Other
 desktops watch the directories themselves. `update-desktop-database` is not
 run: it rebuilds only the MIME cache, and these entries declare no MIME
 types.
+
+## parameters
+
+Values the installer is given or asks for, such as a server address or an
+access token. Actions use them as `{param:<name>}`.
+
+| Key | Meaning |
+|---|---|
+| `name` | Lowercase letters, digits and dashes. It is also the flag `--<name>`, so it cannot be one of the installer's own flags (`dir`, `yes`, `scope` and the others). |
+| `label` | What a prompt and the wizard call it. The default is the name. |
+| `description` | One line of help. |
+| `default` | The value when nothing else gives one. |
+| `secret` | The value is never printed, logged or recorded. A secret has no default, because the default would be published with the config. |
+| `required` | The install stops, and names the flag, when no source gives a value. A required parameter has no default. |
+
+**Where a value comes from**, first match wins:
+
+1. a flag: `--token=…`;
+2. `fynstall-params.yml` in the installer's directory, a flat map of names
+   to values; a name that is not a parameter is an error;
+3. a person, when the installer runs in a terminal without `--yes`; a
+   secret is read without echo;
+4. the default.
+
+The install record keeps the values of non-secret parameters, for a later
+upgrade, and only the names of secret ones.
+
+## actions
+
+Changes an install makes beyond copying files. Each action is recorded with
+its undo, as a file is, so the uninstaller reverses it. `config_file` is
+the only type so far; `service`, `run` and `migrate` come with spec 002
+phase 3.
+
+```yaml
+actions:
+  - config_file:
+      path: "{config}/greet/config.json"
+      values:
+        greeting: "{param:greeting}"
+        token: "{param:token}"
+```
+
+**config_file** writes a configuration file from parameters, so the
+installer does not run the program to produce one.
+
+- `path` starts with `{config}/`, `{data}/` or `{home}/`. Configuration
+  lives outside the install directory.
+- `format` is `yaml` or `json`. Without it, the path's extension decides.
+- `values` is one flat map. Keys are written sorted, and each value is
+  quoted as the format requires.
+- A file that holds a secret parameter is written readable by its owner
+  only (`0600`).
+- The uninstaller removes the file unless its path is under
+  `keep_on_uninstall`. Keep it when the configuration must outlive an
+  uninstall, or an upgrade, which runs the old uninstaller first.
 
 ## targets
 

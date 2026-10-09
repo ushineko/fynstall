@@ -81,6 +81,13 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- Parameters and configuration files: a config declares `parameters`, given
+  by flag, by `fynstall-params.yml` beside the installer, at a prompt or by
+  default, and a `config_file` action writes them into a YAML or JSON file
+  that the uninstaller reverses. Secrets are never printed, logged or
+  recorded, and a test passes one through every path to check (spec 002
+  phase 2, [#6](https://github.com/ushineko/fynstall/issues/6)).
+
 - One config for every target: payload entries can name their `targets`,
   and `{os}`, `{arch}` and `{exe}` resolve per target in payload paths,
   links and desktop entries. Each installer carries the payload for its own

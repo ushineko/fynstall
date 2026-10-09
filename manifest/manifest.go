@@ -44,6 +44,29 @@ type Manifest struct {
 	Links []Link `json:"links,omitempty"`
 	// Desktop entries go in {data}/applications.
 	Desktop []Desktop `json:"desktop,omitempty"`
+	// Parameters are the values the installer asks for or is given.
+	Parameters []Parameter `json:"parameters,omitempty"`
+	// ConfigFiles are written from parameters at install time.
+	ConfigFiles []ConfigFile `json:"config_files,omitempty"`
+}
+
+// Parameter is a declared parameter (spec 002 D3a). A manifest holds the
+// declaration, never a value other than a non-secret default.
+type Parameter struct {
+	Name        string `json:"name"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Default     string `json:"default,omitempty"`
+	Secret      bool   `json:"secret,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+// ConfigFile is a config_file action: Path is a template that starts with
+// {config}, {data} or {home}; Values may use {param:<name>}.
+type ConfigFile struct {
+	Path   string            `json:"path"`
+	Format string            `json:"format"`
+	Values map[string]string `json:"values"`
 }
 
 // IconDir is where the builder puts the resized icons in the embedded

@@ -239,3 +239,56 @@ func TestAnIconDirectoryLinkedOutsideDataIsRefused(t *testing.T) {
 	_, err := NewPlan(f.m, Options{Env: f.env})
 	require.ErrorContains(t, err, "outside the directory it belongs in")
 }
+
+func TestAConfigFileIsRenderedFromParametersAndHoldsItsSecretPrivately(t *testing.T) {
+	f := newFixture(t)
+	f.m.KeepOnUninstall = nil
+	f.m.Parameters = []manifest.Parameter{{Name: "server"}, {Name: "token", Secret: true}}
+	f.m.ConfigFiles = []manifest.ConfigFile{{Path: "{config}/hello/config.yml", Format: "yaml",
+		Values: map[string]string{"server": "{param:server}", "token": "{param:token}", "home": "{home}"}}}
+	before := f.snap(t)
+	p, err := NewPlan(f.m, Options{Env: f.env, Params: map[string]string{"server": "a: b # not a comment", "token": "s3cr3t"}})
+	require.NoError(t, err)
+	r, err := Apply(context.Background(), p, f.payload, nil, nil)
+	require.NoError(t, err)
+
+	path := filepath.Join(f.home, ".config", "hello", "config.yml")
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "home: "+f.home+"\nserver: 'a: b # not a comment'\ntoken: s3cr3t\n", string(b), "sorted keys, quoted where YAML needs it")
+	fi, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), fi.Mode().Perm(), "it holds a secret")
+
+	require.Equal(t, map[string]string{"server": "a: b # not a comment"}, r.Parameters)
+	require.Equal(t, []string{"token"}, r.Secrets)
+	rb, err := os.ReadFile(ReceiptPath(f.root()))
+	require.NoError(t, err)
+	require.NotContains(t, string(rb), "s3cr3t")
+
+	require.NoError(t, Uninstall(r, nil))
+	require.Equal(t, before, f.snap(t))
+}
+
+func TestRenderJSON(t *testing.T) {
+	b, err := render("json", map[string]string{"b": `quote " and \ slash`, "a": "1"})
+	require.NoError(t, err)
+	require.Equal(t, "{\n  \"a\": \"1\",\n  \"b\": \"quote \\\" and \\\\ slash\"\n}\n", string(b))
+}
+
+// Configuration in a kept path survives the uninstall: that is how it
+// survives an upgrade, which runs the old uninstaller first (spec 002 D3a).
+func TestAConfigFileInAKeptPathSurvivesTheUninstall(t *testing.T) {
+	f := newFixture(t) // keeps {config}/hello
+	f.m.ConfigFiles = []manifest.ConfigFile{{Path: "{config}/hello/config.json", Format: "json", Values: map[string]string{"a": "b"}}}
+	p, err := NewPlan(f.m, Options{Env: f.env})
+	require.NoError(t, err)
+	r, err := Apply(context.Background(), p, f.payload, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, Uninstall(r, nil))
+	b, err := os.ReadFile(filepath.Join(f.home, ".config", "hello", "config.json"))
+	require.NoError(t, err)
+	require.Equal(t, "{\n  \"a\": \"b\"\n}\n", string(b))
+	_, err = os.Stat(f.root())
+	require.True(t, errors.Is(err, os.ErrNotExist), "everything else is gone")
+}

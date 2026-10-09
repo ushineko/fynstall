@@ -20,5 +20,25 @@ integration:
   path_links:
     - bin/greet{exe}
 
+# Values come from --greeting=… and friends, from fynstall-params.yml beside
+# the installer, from a prompt, or from the default, in that order.
+parameters:
+  - name: greeting
+    label: Greeting
+    default: hello
+  - name: name
+    label: Your name
+  - name: token
+    label: Access token
+    secret: true
+
+actions:
+  - config_file:
+      path: "{config}/io.ushineko.greet/config.json"
+      values:
+        greeting: "{param:greeting}"
+        name: "{param:name}"
+        token: "{param:token}"
+
 # windows/amd64 joins in spec 001 phase 7.
 targets: [linux/amd64, linux/arm64]

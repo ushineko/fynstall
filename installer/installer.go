@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ushineko/fynstall/engine"
@@ -36,6 +37,9 @@ type Env struct {
 	Getenv   func(string) string
 	// Interactive is true when In is a terminal a person can answer on.
 	Interactive bool
+	// ExeDir is the directory the installer is in, where it looks for
+	// its parameter file.
+	ExeDir string
 }
 
 // Main runs the installer with the process's arguments and exits.
@@ -49,10 +53,16 @@ func UninstallMain() {
 }
 
 func processEnv() Env {
-	return Env{
+	e := Env{
 		In: os.Stdin, Out: os.Stdout, Err: os.Stderr, Getenv: os.Getenv,
 		Interactive: isTerminal(os.Stdin),
 	}
+	if exe, err := os.Executable(); err == nil {
+		if exe, err = filepath.EvalSymlinks(exe); err == nil {
+			e.ExeDir = filepath.Dir(exe)
+		}
+	}
+	return e
 }
 
 // Exit codes. 2 is a usage error, as with the flag package.
