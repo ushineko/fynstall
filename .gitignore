@@ -6,3 +6,5 @@ coverage.out
 /examples/hello/dist/
 /examples/greet/build/
 /examples/greet/dist/
+/examples/beacon/bin/
+/examples/beacon/dist/

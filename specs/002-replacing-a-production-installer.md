@@ -262,6 +262,33 @@ uninstaller can undo it.
 
 **Decided: D2a** (2026-10-08).
 
+Settled for phase 4a (2026-10-09):
+
+- **Phase 4 is two PRs.** 4a lands the actions in per-user scope, where a
+  `service` is a systemd *user* unit (`{config}/systemd/user`, `systemctl
+  --user`) and nothing needs root. 4b is spec 001 phase 5: the privileged
+  helper, system units, and L4.
+- **A service action owns its unit file.** Its journal entry holds the
+  unit's path, a backup of a unit that was there, and whether that unit was
+  enabled and active. The undo stops and disables the install's unit, puts
+  the old file back or removes it, reloads, and enables or starts the old
+  unit again as it was.
+- **`on:` points in 4a are `install` and `uninstall`.** `before_install`
+  and `after_install` are refused by validation, which names the phase that
+  adds them. Before the install, the payload is not on disk to run.
+- **No secret in `run` arguments.** Arguments show in the process list and
+  an `undo` is kept in the receipt. A secret parameter in `args` or `undo`
+  is a config error; a secret reaches the program through `config_file`.
+- **`migrate` moves into a kept path.** `from` and `to` start with
+  `{config}/`, `{data}/` or `{home}/`, and `to` must be at or under a
+  `keep_on_uninstall` path, so the moved data is never a leftover and the
+  uninstaller leaves it. A failed install moves it back; nothing else does.
+- **`stop_processes` waits** for the upgrade phase (spec 001 phase 6) or
+  Windows (phase 7).
+- **Tests use a fake `systemctl`** on `PATH`, as they do for
+  `kbuildsycoca6`: `make test` must not touch the person's own systemd
+  manager. The unit files are real. Real systemd is the desk check's.
+
 ### D4: symlinks in the payload
 
 A real runtime has symlinks. A bundled CPython 3.14 runtime has 54, all of
@@ -494,11 +521,14 @@ Each phase is one PR with its own desk check, as in spec 001.
    `uninstall.remove`. Desk check: a bundled CPython runtime builds as it
    is, installs, runs, and uninstalls; with `uninstall.remove` for its
    bytecode cache, the home is as it was.
-4. **Actions (D2a)**, with spec 001 phase 5: the action journal, `service`
-   (systemd), `run` with `undo` and `on:` (the uninstall hook), `migrate`,
-   and stopping services before a replace. Desk check: a systemd service
-   that runs after install and is gone after uninstall, with a pre-existing
-   unit restored, and an uninstall hook that runs before any file goes.
+4. **Actions (D2a)**, in two PRs.
+   - **4a, per-user**: the action journal, `service` as a systemd user
+     unit, `run` with `undo` and `on: uninstall`, `migrate`, and L3. Desk
+     check: a systemd service that runs after install and is gone after
+     uninstall, with a pre-existing unit restored, and an uninstall hook
+     that runs before any file goes.
+   - **4b, system scope**, with spec 001 phase 5: the privileged helper
+     applies the actions, `service` as a system unit, and L4.
 5. **The experiment**, after spec 001 phase 7: a fynstall config that
    reproduces the reference installer on Windows, compared in a VM against
    a checklist made from [Context](#context). The comparison covers
@@ -614,6 +644,54 @@ Phase 3, real runtimes:
       `uninstall.remove: ["python/**/__pycache__"]` the home is as it was
       before.
 
+Phase 4a, actions in per-user scope:
+
+- [x] The receipt's journal holds `service`, `run` and `migrate` entries.
+      Apply runs the actions in config order after the files and links;
+      the uninstall undoes them in reverse before any file. A failed
+      install undoes the actions it ran. A receipt without actions reads
+      as before. (`TestActionsAreAppliedAndUndone`,
+      `TestAFailedRunUndoesTheInstallAndItsActions`; the earlier receipt
+      tests pass unchanged.)
+- [x] `service` writes `{config}/systemd/user/<name>.service`, reloads the
+      user manager, enables the unit and, with `start: true`, (re)starts
+      it. The uninstall stops, disables and removes it. A unit that was
+      there before is put back, enabled and started again if it was.
+      (`TestActionsAreAppliedAndUndone`,
+      `TestAServiceThatWasThereIsPutBackAsItWas`, with a fake
+      `systemctl`.)
+- [x] `run` (`on: install`) runs a payload program, never a shell, in the
+      install directory, and reports its output. A failure fails the
+      install, which is undone. Its `undo` (arguments, or `none`) runs at
+      uninstall and when a later step fails; a run that fails gets its own
+      undo too, as a rollback would. (`TestAFailingRunCarriesItsOutputAndIsUndone`,
+      `TestAFailedRunUndoesTheInstallAndItsActions`.)
+- [x] `run` with `on: uninstall` runs before anything is removed. A failure
+      stops the uninstall with nothing removed and the receipt kept, unless
+      `continue_on_error: true`. (`TestAFailingUninstallHookStopsTheUninstall`.)
+- [x] `migrate` moves `from` to `to` when `from` exists. A failed install
+      moves it back; the uninstall leaves it. A migrate whose two ends both
+      exist is refused before the install. (`TestActionsAreAppliedAndUndone`,
+      `TestAFailedRunUndoesTheInstallAndItsActions`,
+      `TestAMigrateWhoseTwoEndsExistIsRefused`.)
+- [x] Validation refuses: a secret parameter in `run` arguments; `on:`
+      other than `install` or `uninstall`; an `exec` that is not a payload
+      file; a `run` on install without `undo`; a bad service name; a
+      `migrate` whose `to` is not kept. (`TestActionsAreChecked`; the
+      payload check is the builder's, as for `ui.launch`.)
+- [x] `--dry-run` and the summary page list every action, and the
+      uninstaller states its uninstall hooks before it removes anything.
+      (`TestActionsAreAppliedAndUndone`; the summary page and the
+      uninstall window use the same lines.)
+- [x] L3: while an installer or uninstaller of an app runs, another one
+      for the same app and scope is refused. (`TestASecondInstallerWaitsForNone`,
+      `TestTheLockRefusesASecondHolderUntilReleased`.)
+- [x] Desk check: `examples/beacon` on this machine. After install,
+      `systemctl --user status beacon` shows it running; after uninstall it
+      is gone, and a `beacon.service` that was there before is back with
+      its state. The uninstall hook's output comes before any file is
+      removed, and the home's listing matches the one before.
+
 Experiment (phase 5):
 
 - [ ] A fynstall config installs the reference program on Windows 11 per
@@ -667,6 +745,28 @@ Experiment (phase 5):
 ## Verification
 
 Filled in as each phase lands.
+
+### Phase 4a, actions (2026-10-09)
+
+On CachyOS with KDE Plasma 6, against the real systemd user manager and
+the real home. `make test` (with `-race`), `make lint` (0 issues) and
+`govulncheck` (no vulnerabilities) pass.
+
+- Before the install, a stand-in `beacon.service` (`sleep infinity`) was
+  enabled and running.
+- The installer listed the service ("replaces a service of that name,
+  which the uninstaller puts back"), the run action with its undo, and the
+  uninstall hook, then installed. `systemctl --user status beacon` showed
+  "Beacon, the fynstall example service" enabled and running the installed
+  `bin/beacon serve`, and its journal said `beacon: alive`.
+- The uninstaller said it would run the hook, ran it (`beacon: the
+  uninstall hook ran`), then ran the run action's undo, removed the
+  service, and only then removed files. Afterwards `beacon.service` was the
+  stand-in again, enabled and running `sleep`. The install directory, the
+  run action's file and the index entry were gone. The migrate had nothing
+  to move.
+- The stand-in was then removed by hand, leaving the user manager as it
+  was.
 
 ### Phase 3, the window (2026-10-09)
 

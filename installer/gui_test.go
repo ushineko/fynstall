@@ -50,7 +50,8 @@ func guiFixture(t *testing.T) (*manifest.Manifest, Payload, Env, string) {
 		Launch:  "bin/hello",
 	}
 	p := Payload{Files: fstest.MapFS{"bin/hello": {Data: []byte(content)}}, Uninstaller: []byte("uninstaller")}
-	e := Env{Getenv: func(k string) string { return map[string]string{"HOME": home}[k] }, ExeDir: t.TempDir()}
+	run := t.TempDir()
+	e := Env{Getenv: func(k string) string { return map[string]string{"HOME": home, "XDG_RUNTIME_DIR": run}[k] }, ExeDir: t.TempDir()}
 	return m, p, e, home
 }
 
@@ -167,7 +168,7 @@ func TestTheUninstallerAsksOnceThenRemoves(t *testing.T) {
 			r, err := engine.Apply(context.Background(), plan, p.Files, p.Uninstaller, nil)
 			require.NoError(t, err)
 
-			o := uninstallConfirm(r, skip)
+			o := uninstallConfirm(r, skip, e.Getenv)
 			require.Equal(t, "Uninstall Hello 0.1.0?", o.Question)
 			c := wizard.HeadlessConfirm(fynetest.App(t), o)
 			if !skip {
@@ -199,7 +200,7 @@ func TestTheUninstallWindowOffersToRemoveTheLeftovers(t *testing.T) {
 			made := filepath.Join(r.Root, "state.db")
 			require.NoError(t, os.WriteFile(made, []byte("the program's"), 0o600))
 
-			c := wizard.HeadlessConfirm(fynetest.App(t), uninstallConfirm(r, false))
+			c := wizard.HeadlessConfirm(fynetest.App(t), uninstallConfirm(r, false, e.Getenv))
 			c.Act()
 			require.Equal(t, "Hello left 1 file it made.", c.Question())
 			require.Equal(t, "Hello 0.1.0 was removed.", c.Message())

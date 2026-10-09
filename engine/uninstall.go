@@ -33,6 +33,12 @@ type Leftover struct {
 // is skipped, and the receipt stays until every file is dealt with.
 func Uninstall(r *Receipt, report Reporter) ([]Leftover, error) {
 	j := &journal{root: r.Root, entries: r.Journal, report: report}
+	if len(r.Hooks) > 0 {
+		report.emit(Step, "Running the uninstall hooks of %s", r.App.Name)
+		if err := runHooks(r.Hooks, report); err != nil {
+			return nil, fmt.Errorf("uninstall %s: %w", r.App.Name, err)
+		}
+	}
 	report.emit(Step, "Removing %s %s", r.App.Name, r.App.Version)
 	if err := j.undoFiles(r.Keep); err != nil {
 		return nil, fmt.Errorf("uninstall %s: %w", r.App.Name, err)

@@ -89,6 +89,10 @@ type Plan struct {
 	Symlinks []PlannedLink
 	// Links go in {bin}.
 	Links []PlannedLink
+	// Actions are the service, run and migrate actions, in config order.
+	Actions []PlannedAction
+	// Hooks are the uninstall hooks the receipt keeps.
+	Hooks []Hook
 	// RefreshMenu is true when the install adds launcher entries or icons,
 	// so the front end asks the desktop to read them again.
 	RefreshMenu bool
@@ -178,6 +182,9 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	if err := p.addConfigFiles(vars, o.Params); err != nil {
 		return nil, err
 	}
+	if err := p.addActions(vars, o.Params); err != nil {
+		return nil, err
+	}
 
 	dirs := []string{p.Root, filepath.Join(p.Root, MetaDir), filepath.Join(p.Root, MetaDir, BackupDir), filepath.Dir(p.Index)}
 	for _, f := range p.Files {
@@ -185,6 +192,14 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	}
 	for _, l := range slices.Concat(p.Symlinks, p.Links) {
 		dirs = append(dirs, filepath.Dir(l.Dst))
+	}
+	for _, a := range p.Actions {
+		switch {
+		case a.Service != nil:
+			dirs = append(dirs, filepath.Dir(a.Service.Unit))
+		case a.Migrate != nil && a.Migrate.Present:
+			dirs = append(dirs, filepath.Dir(a.Migrate.To))
+		}
 	}
 	if p.Dirs, err = missingDirs(dirs); err != nil {
 		return nil, err

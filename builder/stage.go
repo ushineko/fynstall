@@ -121,10 +121,8 @@ func stage(c *config.Config, runtimeVersion, target string) (*manifest.Manifest,
 		m.Launch = path.Clean(launch)
 	}
 	for _, a := range c.Actions {
-		if a.ConfigFile != nil {
-			m.ConfigFiles = append(m.ConfigFiles, manifest.ConfigFile{
-				Path: a.ConfigFile.Path, Format: config.FileFormat(a.ConfigFile), Values: a.ConfigFile.Values,
-			})
+		if err := stageAction(a, m, seen, expand); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 	if err := integrate(c, m, seen, expand); err != nil {
@@ -138,6 +136,49 @@ func stage(c *config.Config, runtimeVersion, target string) (*manifest.Manifest,
 		}
 	}
 	return m, files, generated, nil
+}
+
+// stageAction adds a to the manifest. A program it runs must be a payload
+// file for this target, which is known only once directories expand.
+func stageAction(a config.Action, m *manifest.Manifest, payload map[string]string, expand func(string) (string, error)) error {
+	exec := func(kind, tmpl string) (string, error) {
+		e, err := expand(tmpl)
+		if err != nil {
+			return "", err
+		}
+		e = path.Clean(e)
+		if _, ok := payload[e]; !ok {
+			return "", fmt.Errorf("%s: exec %s is not a payload file for %s", kind, tmpl, m.Target)
+		}
+		return e, nil
+	}
+	switch {
+	case a.ConfigFile != nil:
+		m.ConfigFiles = append(m.ConfigFiles, manifest.ConfigFile{
+			Path: a.ConfigFile.Path, Format: config.FileFormat(a.ConfigFile), Values: a.ConfigFile.Values,
+		})
+	case a.Service != nil:
+		s := a.Service
+		e, err := exec("service "+s.Name, s.Exec)
+		if err != nil {
+			return err
+		}
+		m.Actions = append(m.Actions, manifest.Action{Service: &manifest.Service{
+			Name: s.Name, Description: s.Description, Exec: e, Args: s.Args, Start: s.Starts(), Restart: s.RestartPolicy(),
+		}})
+	case a.Run != nil:
+		r := a.Run
+		e, err := exec("run", r.Exec)
+		if err != nil {
+			return err
+		}
+		m.Actions = append(m.Actions, manifest.Action{Run: &manifest.Run{
+			Hook: r.Hook(), Exec: e, Args: r.Args, Undo: r.Undo.Args, NoUndo: r.Undo.None, ContinueOnError: r.ContinueOnError,
+		}})
+	case a.Migrate != nil:
+		m.Actions = append(m.Actions, manifest.Action{Migrate: &manifest.Migrate{From: a.Migrate.From, To: a.Migrate.To}})
+	}
+	return nil
 }
 
 // integrate adds the links and desktop entries, each of which must name a
