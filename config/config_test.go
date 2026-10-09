@@ -217,7 +217,7 @@ func TestParametersAndConfigFilesAreChecked(t *testing.T) {
 		{"a path inside nothing", "actions:\n  - config_file:\n      path: /etc/hello.yml\n      values: {a: b}\n", "actions[0].config_file.path", "must start with {config}/", 10},
 		{"no format", "actions:\n  - config_file:\n      path: \"{config}/hello/config\"\n      values: {a: b}\n", "actions[0].config_file.format", "say format", 9},
 		{"an undeclared parameter", "actions:\n  - config_file:\n      path: \"{config}/hello.json\"\n      values: {a: \"{param:nope}\"}\n", "actions[0].config_file.values.a", "{param:nope} names no parameter", 11},
-		{"a later action type", "actions:\n  - service:\n      name: hello\n", "actions[0]", "arrive in spec 002 phase 3", 9},
+		{"a later action type", "actions:\n  - service:\n      name: hello\n", "actions[0]", "arrive in spec 002 phase 4", 9},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

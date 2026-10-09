@@ -104,6 +104,14 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- Design: spec 002 takes MSI as its reference model, adds uninstall hooks
+  (`run` with `on: uninstall`), keeps symlinks that stay inside a payload
+  (D4), and lists rather than deletes the files a program creates (D5),
+  each found by packaging a real CPython runtime. Spec 003 designs Go
+  extensions: a program's own wizard pages and install hooks, linked into
+  its installer and uninstaller ([#6](https://github.com/ushineko/fynstall/issues/6),
+  [#11](https://github.com/ushineko/fynstall/issues/11)).
+
 - The wizard: `fynstall build` makes a full installer and uninstaller with
   the fynedesygn wizard (welcome, licence, settings, location, summary,
   progress, finish), and `--with-cli-only` the CLI variant beside it. The

@@ -395,7 +395,7 @@ func (k *checker) actions(c *Config) {
 			continue
 		}
 		if a.ConfigFile == nil {
-			k.fail(k.line("actions", i), field, "service, run and migrate actions arrive in spec 002 phase 3")
+			k.fail(k.line("actions", i), field, "service, run and migrate actions arrive in spec 002 phase 4")
 			continue
 		}
 		k.configFile(a.ConfigFile, field+".config_file", params, "actions", i, "config_file")
