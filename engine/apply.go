@@ -84,11 +84,22 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 		report.emit(Detail, "%s", f.Dst)
 	}
 
+	if len(p.Links) > 0 {
+		report.emit(Step, "Linking")
+	}
+	for _, l := range p.Links {
+		if err := j.link(l.Dst, l.Target, l.Exists); err != nil {
+			return nil, err
+		}
+		report.emit(Detail, "%s -> %s", l.Dst, l.Target)
+	}
+
 	report.emit(Step, "Recording the install")
 	rcpt = &Receipt{
 		Schema: ReceiptSchema, RuntimeVersion: p.Manifest.RuntimeVersion,
 		App: p.Manifest.App, Scope: p.Scope, Root: p.Root,
 		Uninstaller: filepath.Join(p.Root, UninstallName), Index: p.Index, Keep: p.Keep,
+		RefreshMenu: p.RefreshMenu,
 	}
 	ix, err := marshal(Index{Root: p.Root, Uninstaller: rcpt.Uninstaller, Version: p.Manifest.App.Version, Scope: p.Scope})
 	if err != nil {
@@ -120,8 +131,11 @@ type journal struct {
 func (j *journal) add(e Entry) { j.entries = append(j.entries, e) }
 
 func (j *journal) writePlanned(f PlannedFile, payload fs.FS, uninstaller []byte) error {
-	if f.Source == FromUninstaller {
+	switch f.Source {
+	case FromUninstaller:
 		return j.write(f.Dst, bytes.NewReader(uninstaller), f.SHA256, os.FileMode(f.Mode), f.Exists)
+	case FromContent:
+		return j.write(f.Dst, bytes.NewReader(f.Content), f.SHA256, os.FileMode(f.Mode), f.Exists)
 	}
 	src, err := payload.Open(f.Path)
 	if err != nil {
@@ -131,25 +145,50 @@ func (j *journal) writePlanned(f PlannedFile, payload fs.FS, uninstaller []byte)
 	return j.write(f.Dst, src, f.SHA256, os.FileMode(f.Mode), f.Exists)
 }
 
-// write puts r at dst. When something is already there it is copied to the
-// backup directory first and the change is journalled as a replace.
+// write puts r at dst. What is already there is saved first and the change
+// is journalled as a replace.
 func (j *journal) write(dst string, r io.Reader, sum string, mode os.FileMode, exists bool) error {
+	return j.replace(dst, exists, func() error { return atomicWrite(dst, r, sum, mode) })
+}
+
+// link makes dst a symlink to target, saving what was there.
+func (j *journal) link(dst, target string, exists bool) error {
+	return j.replace(dst, exists, func() error { return atomicSymlink(target, dst) })
+}
+
+func (j *journal) replace(dst string, exists bool, do func() error) error {
 	e := Entry{Op: OpCreate, Path: dst}
 	if exists {
 		e.Op = OpReplace
-		e.Backup = fmt.Sprintf("%04d", len(j.entries))
-		if err := copyFile(dst, filepath.Join(backupDir(j.root), e.Backup)); err != nil {
+		if err := j.save(dst, &e); err != nil {
 			return fmt.Errorf("back up %s: %w", dst, err)
 		}
 	}
-	if err := atomicWrite(dst, r, sum, mode); err != nil {
-		if exists {
+	if err := do(); err != nil {
+		if e.Backup != "" {
 			_ = os.Remove(filepath.Join(backupDir(j.root), e.Backup))
 		}
 		return err
 	}
 	j.add(e)
 	return nil
+}
+
+// save records what is at dst so it can be put back: a symlink by its
+// target, anything else as a copy in the backup directory.
+func (j *journal) save(dst string, e *Entry) error {
+	fi, err := os.Lstat(dst)
+	if err != nil {
+		return fmt.Errorf("stat: %w", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		if e.OldLink, err = os.Readlink(dst); err != nil {
+			return fmt.Errorf("readlink: %w", err)
+		}
+		return nil
+	}
+	e.Backup = fmt.Sprintf("%04d", len(j.entries))
+	return copyFile(dst, filepath.Join(backupDir(j.root), e.Backup))
 }
 
 // undo reverses the journal: files first, newest first, then directories,
@@ -197,6 +236,12 @@ func (j *journal) undo(keep []string) error {
 }
 
 func (j *journal) restore(e Entry) error {
+	if e.OldLink != "" {
+		if err := atomicSymlink(e.OldLink, e.Path); err != nil {
+			return fmt.Errorf("restore %s: %w", e.Path, err)
+		}
+		return nil
+	}
 	b := filepath.Join(backupDir(j.root), e.Backup)
 	f, err := os.Open(b)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -258,6 +303,21 @@ func atomicWrite(dst string, r io.Reader, sum string, mode os.FileMode) (err err
 	}
 	if err := os.Rename(tmp.Name(), dst); err != nil {
 		return fmt.Errorf("write %s: %w", dst, err)
+	}
+	return nil
+}
+
+// atomicSymlink makes dst a symlink to target, replacing what is there in
+// one rename.
+func atomicSymlink(target, dst string) error {
+	tmp := filepath.Join(filepath.Dir(dst), fmt.Sprintf(".fynstall-link-%d", os.Getpid()))
+	_ = os.Remove(tmp)
+	if err := os.Symlink(target, tmp); err != nil {
+		return fmt.Errorf("link %s: %w", dst, err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("link %s: %w", dst, err)
 	}
 	return nil
 }

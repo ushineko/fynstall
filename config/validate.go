@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"image/png"
 	"os"
 	"path"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"go.yaml.in/yaml/v3"
 
@@ -119,6 +121,11 @@ func validate(c *Config, root *yaml.Node) Errors {
 		}
 		k.template(dir, field, "install", "dir", scope)
 	}
+	if c.App.Icon != "" {
+		k.icon(c)
+	}
+	k.links(c)
+	k.desktop(c)
 	for i, p := range c.Integration.KeepOnUninstall {
 		k.template(p, "integration.keep_on_uninstall", "integration", "keep_on_uninstall", i)
 	}
@@ -163,6 +170,75 @@ func (k *checker) entry(c *Config, i int, e Entry) {
 	for j, pat := range e.Exclude {
 		if _, err := path.Match(pat, ""); err != nil {
 			k.fail(k.line("payload", i, "exclude", j), field+".exclude", "bad pattern %q", pat)
+		}
+	}
+}
+
+func (k *checker) icon(c *Config) {
+	f, err := os.Open(filepath.Join(c.Dir, filepath.FromSlash(c.App.Icon)))
+	if err != nil {
+		k.fail(k.line("app", "icon"), "app.icon", "%s does not exist", c.App.Icon)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	cfg, err := png.DecodeConfig(f)
+	switch {
+	case err != nil:
+		k.fail(k.line("app", "icon"), "app.icon", "%s is not a PNG: %v", c.App.Icon, err)
+	case cfg.Width != cfg.Height:
+		k.fail(k.line("app", "icon"), "app.icon", "%s is %dx%d; it must be square", c.App.Icon, cfg.Width, cfg.Height)
+	case cfg.Width < MinIconSize:
+		k.fail(k.line("app", "icon"), "app.icon", "%s is %d px; it must be at least %d", c.App.Icon, cfg.Width, MinIconSize)
+	}
+}
+
+func (k *checker) links(c *Config) {
+	names := map[string]bool{}
+	for i, l := range c.Integration.PathLinks {
+		line := k.line("integration", "path_links", i)
+		if msg := CheckDst(l); msg != "" {
+			k.fail(line, "integration.path_links", "%s", msg)
+			continue
+		}
+		name := path.Base(l)
+		if names[name] {
+			k.fail(line, "integration.path_links", "two links are named %q", name)
+		}
+		names[name] = true
+	}
+}
+
+var categoryRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+
+func (k *checker) desktop(c *Config) {
+	ids := map[string]bool{}
+	for i, d := range c.Integration.Desktop {
+		field := fmt.Sprintf("integration.desktop[%d]", i)
+		at := func(key string) int { return k.line("integration", "desktop", i, key) }
+		if !idRE.MatchString(d.ID) {
+			k.fail(at("id"), field+".id", "%q is not a reverse-DNS ID such as io.example.app", d.ID)
+		}
+		if ids[d.ID] {
+			k.fail(at("id"), field+".id", "two entries have the ID %q", d.ID)
+		}
+		ids[d.ID] = true
+		if strings.TrimSpace(d.Name) == "" {
+			k.fail(at("name"), field+".name", "required")
+		}
+		for key, v := range map[string]string{"name": d.Name, "comment": d.Comment} {
+			if strings.ContainsFunc(v, unicode.IsControl) {
+				k.fail(at(key), field+"."+key, "must be one line of text")
+			}
+		}
+		if strings.TrimSpace(d.Exec) == "" {
+			k.fail(at("exec"), field+".exec", "required")
+		} else if msg := CheckDst(d.Exec); msg != "" {
+			k.fail(at("exec"), field+".exec", "%s", msg)
+		}
+		for j, cat := range d.Categories {
+			if !categoryRE.MatchString(cat) {
+				k.fail(k.line("integration", "desktop", i, "categories", j), field+".categories", "%q is not a category name", cat)
+			}
 		}
 	}
 }

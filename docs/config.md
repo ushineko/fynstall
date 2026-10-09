@@ -28,6 +28,12 @@ optional key does not become a setting that is silently ignored.
 | `name` | yes | The name shown to the user. |
 | `version` | yes | A version such as `1.2.3` or `1.2.3-rc.1`. |
 | `publisher` | no | Who makes the program. |
+| `icon` | no | A square PNG of at least 512 px, relative to `fynstall.yaml`. |
+
+The build resizes the icon to 16, 32, 48, 64, 128, 256 and 512 px. Each
+size is installed into the hicolor icon theme under the app ID. KDE uses
+the size that matches the size it asks for, and it only scales between the
+sizes the theme declares, so one large icon is not enough.
 
 The output files take their name from the last segment of the ID:
 `io.example.hello` version 0.1.0 gives `hello-0.1.0-linux-amd64-installer`.
@@ -81,9 +87,41 @@ install to the same `dst`.
 
 | Key | Meaning |
 |---|---|
+| `path_links` | Payload destinations to link into `{bin}`, each under its own base name. |
+| `desktop` | Launcher entries. See below. |
 | `keep_on_uninstall` | Paths that the uninstaller never touches, such as the program's own settings. The uninstaller prints them, so the user knows where their data is. |
 
-Launcher entries, icons and links on `PATH` come with spec 001 phase 2.
+**Links.** Each link is a symlink in `{bin}` (`~/.local/bin` for a per-user
+install) that points at the installed file. Two links cannot have the same
+name. If `{bin}` is not on the user's `PATH`, the installer says so.
+
+**Desktop entries.** Each entry is written to
+`{data}/applications/<id>.desktop`.
+
+| Key | Required | Meaning |
+|---|---|---|
+| `id` | no | The file name without `.desktop`. The default is `app.id`. |
+| `name` | yes | The name in the launcher. |
+| `comment` | no | One line that describes the program. |
+| `exec` | yes | The payload destination to run. The installer writes its absolute path. |
+| `args` | no | Arguments after the program. |
+| `categories` | no | Launcher categories, such as `Utility`. |
+| `terminal` | no | `true` runs the program in a terminal. |
+
+The program's main window needs an entry whose ID is the app ID. On
+Wayland, the compositor finds a window's icon through the desktop entry
+whose name matches the window's `app_id`. Without that entry the taskbar
+shows a generic icon. The `Icon` key of every entry is the app ID when
+`app.icon` is set.
+
+The installer quotes `exec` and `args` as the Desktop Entry Specification
+requires, so an install directory with spaces in its path works.
+
+After an install and after an uninstall, the installer runs `kbuildsycoca6`
+if it is on `PATH`, so KDE shows the change without a new login. Other
+desktops watch the directories themselves. `update-desktop-database` is not
+run: it rebuilds only the MIME cache, and these entries declare no MIME
+types.
 
 ## targets
 
@@ -116,8 +154,17 @@ Inside the install directory:
 - `.fynstall/receipt.json`, the record of every change the install made;
 - `.fynstall/backup/`, a copy of every file the install replaced.
 
-Outside it, `{data}/fynstall/installs/<id>.json` records where the install
-is. A later installer reads it to find the install and its uninstaller.
+Outside it:
+
+- `{data}/fynstall/installs/<id>.json` records where the install is. A later
+  installer reads it to find the install and its uninstaller.
+- `{data}/applications/<id>.desktop` for each desktop entry.
+- `{data}/icons/hicolor/<size>x<size>/apps/<app id>.png` for each icon size.
+- `{bin}/<name>` for each link.
+
+A file or link that is already at one of these paths is saved first. A
+link is saved as its target, so the uninstaller puts back a link and not a
+copy of the file it pointed at.
 
 The uninstaller undoes the receipt's changes in reverse order. It removes
 what the install created and puts back what it replaced. Then it removes the

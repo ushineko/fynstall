@@ -140,7 +140,9 @@ and scope in `platform`, so one config serves every target.
   because `embed.FS` does not keep file modes.
 - R4 The build resizes the icon to the hicolor sizes (16, 32, 48, 64, 128,
   256, 512) and to a multi-size `.ico` for Windows. The installer's own window
-  icon is the same image.
+  icon is the same image. The `.ico` is phase 7 work and the window icon is
+  phase 4 work; phase 2 delivers the hicolor sizes. The source must be a
+  square PNG of at least 512 px, so every size is a reduction.
 - R5 The generated module requires the fynstall runtime at the builder's own
   module version (from `debug.ReadBuildInfo`). For local development,
   `--runtime-path` adds a `replace` directive.
@@ -196,7 +198,8 @@ drifts from what is on disk.
   at that installed file. On Windows this is the `UninstallString` in the
   Uninstall registry key. On Linux the receipt and the install index record
   the path. An optional "Uninstall <name>" `.desktop` action that points at
-  it is phase 2 work.
+  it is phase 4 work: launched from the menu it has no terminal, and the CLI
+  uninstaller refuses to run without one unless given `--yes`.
 - R9d The uninstaller reads the journal in reverse order. It removes what
   the install created, restores each backed-up file and previous registry
   value, removes registry keys the install created (Windows), and removes
@@ -243,9 +246,11 @@ drifts from what is on disk.
 - R15 Per-user scope: `.desktop` in `~/.local/share/applications`, icons in
   `~/.local/share/icons/hicolor/<size>/apps`, and links in `~/.local/bin`.
   System scope: `/usr/share/applications`, `/usr/share/icons/hicolor` and
-  `/usr/local/bin`. After a change, the engine refreshes the menu with
-  `update-desktop-database` and `kbuildsycoca6` if they are present. A
-  failure there is a warning and not an error.
+  `/usr/local/bin`. After a change, the installer and the uninstaller
+  refresh the menu with `kbuildsycoca6` if it is present. A failure there is
+  a warning and not an error. `update-desktop-database` is not run: it
+  rebuilds only `mimeinfo.cache`, the entries declare no MIME types, and
+  rewriting that file would be a change the install had no reason to make.
 - R16 If `~/.local/bin` is not on `PATH`, the finish page and the CLI output
   say so.
 
@@ -352,15 +357,31 @@ Upgrade, repair and downgrade stay in phase 6. `fynstall build` without
 
 ### Phase 2: Linux desktop integration, per-user (R4, R15, R16)
 
-- [ ] Icon resize produces the seven sizes. Each is a valid PNG of the
-      stated size (unit).
-- [ ] Integration test (temp `HOME`, `XDG_DATA_HOME`): `.desktop` passes
-      `desktop-file-validate` if it is installed, otherwise a parser check.
-      Icons exist at every size. The `~/.local/bin/hello` link resolves.
-      Uninstall removes all three.
-- [ ] Restore test, moved from phase 1: a pre-existing `~/.local/bin/hello`
-      is replaced by the link on install and restored on uninstall.
-- [ ] Desk check (KDE Plasma 6): after install, "Hello" appears in the
+- [x] Icon resize produces the seven sizes. Each is a valid PNG of the
+      stated size. Checked on the installed icons in
+      `TestInstallWritesThePayloadAndTheUninstallerRemovesIt`; a non-square,
+      too small or non-PNG icon is a config error with its line
+      (`TestIntegrationKeysAreChecked`).
+- [x] Integration test (temp `HOME`): `.desktop` passes
+      `desktop-file-validate` with no warnings, or is logged as unvalidated
+      where the tool is missing. Icons exist at every size. The
+      `~/.local/bin/hello` link resolves. Uninstall removes all three.
+      `Exec` quoting follows the specification for spaces, quotes, `$`,
+      backticks, backslashes and `%` (`platform/desktop_test.go`).
+- [x] Restore test, moved from phase 1: a pre-existing `~/.local/bin/hello`
+      is replaced by the link on install and restored on uninstall
+      (`TestUninstallRestoresTheFileALinkReplaced`). In the engine, a
+      pre-existing symlink is restored as a symlink with its target
+      (`TestALinkPutsBackTheFileOrLinkItReplaced`); a mutation that restored
+      it as nothing failed that test.
+- [x] Containment outside the install directory: an `icons` directory that
+      is a symlink out of `{data}` is refused
+      (`TestAnIconDirectoryLinkedOutsideDataIsRefused`).
+- [x] The menu refresh runs once after the install and once after the
+      uninstall (`TestTheMenuIsRefreshedAfterInstallAndUninstall`, with a
+      fake `kbuildsycoca6` on `PATH`). The other real-process tests run with
+      an empty `PATH`, so they never rebuild the real KDE cache.
+- [x] Desk check (KDE Plasma 6): after install, "Hello" appears in the
       application launcher with its icon at menu and panel sizes, and it
       starts from there. On Wayland the running window shows the icon in the
       taskbar, which proves the desktop file's base name matches the app ID. After uninstall it is gone from the launcher without
@@ -563,6 +584,27 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 2 (2026-10-08)
+
+Same machine. `make test` (with `-race`) and `make lint` (0 issues) pass.
+`govulncheck` first reported five advisories in `golang.org/x/net` v0.59.0,
+an indirect dependency through Fyne that no fynstall code calls; it was
+raised to v0.60.0, after which govulncheck reports none.
+
+Desk check, in the user's real home directory, with an installer built
+from this branch:
+
+- The install printed `==> Linking` and no PATH note, since `~/.local/bin`
+  is on the user's PATH.
+- "Hello" appeared in the KDE launcher with its icon, without a logout.
+- Started from the launcher, the window showed the icon in the taskbar on
+  Wayland, which the phase 0 desk check could not.
+- `hello` ran from a terminal through the `~/.local/bin` link.
+- After `uninstall`, the launcher no longer listed Hello, without a logout.
+- Afterwards, the listings of `~/.local/share`, `~/.config`, `~/.local/bin`,
+  `~/.local/share/applications` and the seven hicolor `apps` directories
+  matched those taken before the install. `mimeinfo.cache` kept its sha256.
 
 ### Plan
 

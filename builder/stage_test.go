@@ -38,11 +38,11 @@ func TestTheSameTreeGivesTheSameManifestBytes(t *testing.T) {
 		config.Entry{Src: "share", Dst: "share", Exclude: []string{"*.tmp"}},
 		config.Entry{Src: "bin/hello", Dst: "bin/"},
 	)
-	m1, _, err := stage(c, "test")
+	m1, _, _, err := stage(c, "test")
 	require.NoError(t, err)
 	b1, err := m1.Marshal()
 	require.NoError(t, err)
-	m2, _, err := stage(c, "test")
+	m2, _, _, err := stage(c, "test")
 	require.NoError(t, err)
 	b2, err := m2.Marshal()
 	require.NoError(t, err)
@@ -62,20 +62,20 @@ func TestTheSameTreeGivesTheSameManifestBytes(t *testing.T) {
 
 func TestAConfigModeOverridesDetection(t *testing.T) {
 	dir := tree(t, map[string]string{"bin/tool": "data"})
-	m, _, err := stage(cfg(dir, config.Entry{Src: "bin/tool", Dst: "bin/tool", Mode: "0750"}), "test")
+	m, _, _, err := stage(cfg(dir, config.Entry{Src: "bin/tool", Dst: "bin/tool", Mode: "0750"}), "test")
 	require.NoError(t, err)
 	require.Equal(t, uint32(0o750), m.Files[0].Mode)
 }
 
 func TestTwoSourcesForOneDestinationIsAnError(t *testing.T) {
 	dir := tree(t, map[string]string{"a": "1", "b": "2"})
-	_, _, err := stage(cfg(dir, config.Entry{Src: "a", Dst: "x"}, config.Entry{Src: "b", Dst: "x"}), "test")
+	_, _, _, err := stage(cfg(dir, config.Entry{Src: "a", Dst: "x"}, config.Entry{Src: "b", Dst: "x"}), "test")
 	require.ErrorContains(t, err, "both install to x")
 }
 
 func TestSymlinksInThePayloadAreRefused(t *testing.T) {
 	dir := tree(t, map[string]string{"share/a": "1"})
 	require.NoError(t, os.Symlink("a", filepath.Join(dir, "share", "link")))
-	_, _, err := stage(cfg(dir, config.Entry{Src: "share", Dst: "share"}), "test")
+	_, _, _, err := stage(cfg(dir, config.Entry{Src: "share", Dst: "share"}), "test")
 	require.ErrorContains(t, err, "symlinks are not followed")
 }

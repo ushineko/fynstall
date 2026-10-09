@@ -2,8 +2,11 @@ package config
 
 import (
 	"errors"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -86,4 +89,53 @@ func TestCheckDst(t *testing.T) {
 	} {
 		require.Equal(t, ok, CheckDst(dst) == "", "%q: %s", dst, CheckDst(dst))
 	}
+}
+
+func writePNG(t *testing.T, dir, name string, w, h int) {
+	t.Helper()
+	f, err := os.Create(filepath.Join(dir, name))
+	require.NoError(t, err)
+	require.NoError(t, png.Encode(f, image.NewNRGBA(image.Rect(0, 0, w, h))))
+	require.NoError(t, f.Close())
+}
+
+func TestIntegrationKeysAreChecked(t *testing.T) {
+	cases := []struct {
+		name, extra string
+		line        int
+		field, want string
+	}{
+		{"non-square icon", "  icon: wide.png\n", 5, "app.icon", "must be square"},
+		{"small icon", "  icon: small.png\n", 5, "app.icon", "at least 512"},
+		{"icon not a png", "  icon: bin/hello\n", 5, "app.icon", "not a PNG"},
+		{"duplicate link name", "integration:\n  path_links: [bin/hello, other/hello]\n", 9, "integration.path_links", `two links are named "hello"`},
+		{"desktop without exec", "integration:\n  desktop:\n    - name: Hello\n", 10, "integration.desktop[0].exec", "required"},
+		{"bad category", "integration:\n  desktop:\n    - name: Hello\n      exec: bin/hello\n      categories: [\"Not one\"]\n", 12, "integration.desktop[0].categories", "not a category"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			yaml := "app:\n  id: io.example.hello\n  name: Hello\n  version: 0.1.0\n"
+			if strings.HasPrefix(tc.extra, "  icon") {
+				yaml += tc.extra + "payload:\n  - src: bin/hello\n    dst: bin/hello\n"
+			} else {
+				yaml += "payload:\n  - src: bin/hello\n    dst: bin/hello\n" + tc.extra
+			}
+			p := write(t, yaml)
+			writePNG(t, filepath.Dir(p), "wide.png", 1024, 512)
+			writePNG(t, filepath.Dir(p), "small.png", 256, 256)
+			_, err := Load(p)
+			var errs Errors
+			require.True(t, errors.As(err, &errs), "%v", err)
+			require.Len(t, errs, 1, "%v", errs)
+			require.Equal(t, tc.line, errs[0].Line, "%v", errs[0])
+			require.Equal(t, tc.field, errs[0].Field)
+			require.Contains(t, errs[0].Msg, tc.want)
+		})
+	}
+}
+
+func TestADesktopEntryTakesTheAppIDByDefault(t *testing.T) {
+	c, err := Load(write(t, valid+"integration:\n  desktop:\n    - name: Hello\n      exec: bin/hello\n"))
+	require.NoError(t, err)
+	require.Equal(t, "io.example.hello", c.Integration.Desktop[0].ID)
 }

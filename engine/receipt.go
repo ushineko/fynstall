@@ -33,6 +33,9 @@ type Entry struct {
 	Op     Op     `json:"op"`
 	Path   string `json:"path"`
 	Backup string `json:"backup,omitempty"`
+	// OldLink is the target of a symlink that a replace removed. A link is
+	// put back as a link, not as a copy of what it pointed at.
+	OldLink string `json:"old_link,omitempty"`
 }
 
 // Receipt is what an install leaves at <root>/.fynstall/receipt.json, and
@@ -46,6 +49,7 @@ type Receipt struct {
 	Uninstaller    string       `json:"uninstaller"`
 	Index          string       `json:"index"`
 	Keep           []string     `json:"keep_on_uninstall,omitempty"`
+	RefreshMenu    bool         `json:"refresh_menu,omitempty"`
 	Journal        []Entry      `json:"journal"`
 }
 

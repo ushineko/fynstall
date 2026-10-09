@@ -5,6 +5,7 @@ app:
   name: Hello
   version: 0.1.0
   publisher: ushineko
+  icon: hello.png
 
 install:
   scopes: [user]
@@ -18,5 +19,11 @@ payload:
     dst: share/doc/README.md
 
 integration:
+  path_links: [bin/hello]
+  desktop:
+    - name: Hello
+      comment: The example program fynstall installs
+      exec: bin/hello
+      categories: [Utility]
   keep_on_uninstall:
     - "{config}/io.ushineko.hello"

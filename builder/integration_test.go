@@ -19,9 +19,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -64,7 +66,7 @@ func setup(work string) error {
 	if err := os.MkdirAll(filepath.Join(src, "bin"), 0o750); err != nil {
 		return err
 	}
-	for _, f := range []string{"fynstall.yaml", "README.md"} {
+	for _, f := range []string{"fynstall.yaml", "README.md", "hello.png"} {
 		b, err := os.ReadFile(filepath.Join(repo, "examples", "hello", f))
 		if err != nil {
 			return err
@@ -98,26 +100,34 @@ func setup(work string) error {
 	return err
 }
 
-// home is a temporary HOME and the install directory the default config
-// gives inside it.
+// home is a temporary HOME, the install directory the default config gives
+// inside it, and the PATH programs run with. PATH is an empty directory, so
+// the desktop's real tools (kbuildsycoca6) never run against the test's
+// home; TestTheMenuIsRefreshedAfterInstallAndUninstall puts a fake one there.
 type home struct {
 	dir  string
 	root string
+	path string
 }
 
 func newHome(t *testing.T) home {
 	t.Helper()
 	require.NoError(t, setupFail)
 	d := t.TempDir()
-	return home{dir: d, root: filepath.Join(d, ".local", "share", "io.ushineko.hello")}
+	return home{dir: d, root: filepath.Join(d, ".local", "share", "io.ushineko.hello"), path: t.TempDir()}
 }
+
+func (h home) data(rel string) string {
+	return filepath.Join(h.dir, ".local", "share", filepath.FromSlash(rel))
+}
+func (h home) link() string { return filepath.Join(h.dir, ".local", "bin", "hello") }
 
 // run starts a program with only HOME and PATH set and no terminal, and
 // returns its exit code and combined output.
 func (h home) run(t *testing.T, prog string, args ...string) (int, string) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), prog, args...)
-	cmd.Env = []string{"HOME=" + h.dir, "PATH=" + os.Getenv("PATH")}
+	cmd.Env = []string{"HOME=" + h.dir, "PATH=" + h.path}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -157,6 +167,33 @@ func TestInstallWritesThePayloadAndTheUninstallerRemovesIt(t *testing.T) {
 	require.Equal(t, os.FileMode(0o755), fi.Mode().Perm(), "an ELF file is installed executable")
 	require.Equal(t, sum(t, v1Art.Uninstaller), sum(t, filepath.Join(h.root, "uninstall")),
 		"the installed uninstaller is the separate artifact in dist (R9b, R9c)")
+
+	// Desktop integration (R4, R15, R16).
+	entry := h.data("applications/io.ushineko.hello.desktop")
+	b, err := os.ReadFile(entry)
+	require.NoError(t, err)
+	require.Contains(t, string(b), "Exec="+filepath.Join(h.root, "bin", "hello")+"\n")
+	require.Contains(t, string(b), "Icon=io.ushineko.hello\n")
+	if tool, err := exec.LookPath("desktop-file-validate"); err == nil {
+		out, err := exec.CommandContext(t.Context(), tool, entry).CombinedOutput()
+		require.NoError(t, err, string(out))
+		require.Empty(t, strings.TrimSpace(string(out)))
+	} else {
+		t.Log("desktop-file-validate is not installed; the entry was not validated")
+	}
+	for _, size := range []int{16, 32, 48, 64, 128, 256, 512} {
+		p := h.data(fmt.Sprintf("icons/hicolor/%dx%d/apps/io.ushineko.hello.png", size, size))
+		f, err := os.Open(p)
+		require.NoError(t, err)
+		cfg, err := png.DecodeConfig(f)
+		require.NoError(t, f.Close())
+		require.NoError(t, err, p)
+		require.Equal(t, []int{size, size}, []int{cfg.Width, cfg.Height}, p)
+	}
+	target, err := filepath.EvalSymlinks(h.link())
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(h.root, "bin", "hello"), target)
+	require.Contains(t, out, "is not on your PATH", "the test PATH does not hold ~/.local/bin")
 
 	code, out = h.run(t, filepath.Join(h.root, "uninstall"), "--yes")
 	require.Equal(t, 0, code, out)
@@ -238,4 +275,43 @@ func TestTheInstallerRefusesWhatItCannotDo(t *testing.T) {
 	require.Equal(t, 0, code, out)
 	require.Contains(t, out, "create   "+filepath.Join(h.root, "bin", "hello"))
 	require.Equal(t, before, h.snap(t), "none of these changed anything")
+}
+
+func TestUninstallRestoresTheFileALinkReplaced(t *testing.T) {
+	h := newHome(t)
+	require.NoError(t, os.MkdirAll(filepath.Dir(h.link()), 0o750))
+	require.NoError(t, os.WriteFile(h.link(), []byte("#!/bin/sh\necho my own hello\n"), 0o700))
+	before := h.snap(t)
+
+	code, out := h.run(t, v1Art.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "replaces "+h.link())
+	target, err := os.Readlink(h.link())
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(h.root, "bin", "hello"), target)
+
+	code, out = h.run(t, filepath.Join(h.root, "uninstall"), "--yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
+}
+
+func TestTheMenuIsRefreshedAfterInstallAndUninstall(t *testing.T) {
+	h := newHome(t)
+	log := filepath.Join(t.TempDir(), "calls")
+	fake := "#!/bin/sh\necho called >> '" + log + "'\n"
+	require.NoError(t, os.WriteFile(filepath.Join(h.path, "kbuildsycoca6"), []byte(fake), 0o700)) // #nosec G306 -- a test script that must run
+	before := h.snap(t)
+
+	code, out := h.run(t, v1Art.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	b, err := os.ReadFile(log)
+	require.NoError(t, err)
+	require.Equal(t, "called\n", string(b), "once, after the install")
+
+	code, out = h.run(t, filepath.Join(h.root, "uninstall"), "--yes")
+	require.Equal(t, 0, code, out)
+	b, err = os.ReadFile(log)
+	require.NoError(t, err)
+	require.Equal(t, "called\ncalled\n", string(b), "and once after the uninstall")
+	require.Equal(t, before, h.snap(t))
 }

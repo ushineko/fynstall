@@ -12,8 +12,9 @@ through Go embedding, so the person who runs it needs no toolchain.
 Early development. The plan is [spec 001](specs/001-installer-prototype.md),
 delivered in phases; this README changes as each phase lands.
 
-Phase 1 builds command-line installers for Linux, per-user. Desktop
-integration, the wizard, system-wide installs, upgrades and Windows follow.
+Phases 1 and 2 build command-line installers for Linux, per-user, with
+launcher entries, icons and links on `PATH`. The wizard, system-wide
+installs, upgrades and Windows follow.
 
 ## Using it
 
@@ -78,6 +79,12 @@ MIT. See [LICENSE](LICENSE).
 ## Changelog
 
 ### Unreleased
+
+- Desktop integration on Linux: the build resizes `app.icon` to the seven
+  hicolor sizes, and the installer adds launcher entries, icons and links in
+  `~/.local/bin`, then refreshes the KDE menu. The uninstaller puts back a
+  file or link that a link replaced (spec 001 phase 2,
+  [#1](https://github.com/ushineko/fynstall/issues/1)).
 
 - Command-line installers for Linux, per-user: `fynstall init`, `validate`
   and `build --cli-only`. The installer checks each file's sha256, undoes a

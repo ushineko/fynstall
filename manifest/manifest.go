@@ -34,6 +34,48 @@ type Manifest struct {
 	KeepOnUninstall []string `json:"keep_on_uninstall,omitempty"`
 	// Files are sorted by Path, so the same input gives the same bytes.
 	Files []File `json:"files"`
+	// Icons are the app icon at each hicolor size, sorted by size.
+	Icons []Icon `json:"icons,omitempty"`
+	// Links go in {bin}, each pointing at a payload file.
+	Links []Link `json:"links,omitempty"`
+	// Desktop entries go in {data}/applications.
+	Desktop []Desktop `json:"desktop,omitempty"`
+}
+
+// IconDir is where the builder puts the resized icons in the embedded
+// payload. Payload destinations can never be inside .fynstall, so the two
+// cannot collide.
+const IconDir = ".fynstall/icons"
+
+// Icon is the app icon at one size, stored in the embedded payload at
+// IconDir/<size>.png.
+type Icon struct {
+	Size   int    `json:"size"`
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
+// Path is the icon's path in the embedded payload.
+func (i Icon) Path() string { return fmt.Sprintf("%s/%d.png", IconDir, i.Size) }
+
+// Link is a symlink in {bin} named Name, pointing at the payload file
+// Target (a File.Path).
+type Link struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
+}
+
+// Desktop is a launcher entry. Exec is a File.Path; the installer makes it
+// absolute. Icon names the app's icon when there is one.
+type Desktop struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Comment    string   `json:"comment,omitempty"`
+	Exec       string   `json:"exec"`
+	Args       []string `json:"args,omitempty"`
+	Categories []string `json:"categories,omitempty"`
+	Terminal   bool     `json:"terminal,omitempty"`
+	Icon       bool     `json:"icon,omitempty"`
 }
 
 // App identifies the program being installed.
