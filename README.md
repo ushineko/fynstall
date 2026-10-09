@@ -12,26 +12,49 @@ through Go embedding, so the person who runs it needs no toolchain.
 Early development. The plan is [spec 001](specs/001-installer-prototype.md),
 delivered in phases; this README changes as each phase lands.
 
-Phases 1 and 2 build command-line installers for Linux, per-user, with
-launcher entries, icons and links on `PATH`. The wizard, system-wide
-installs, upgrades and Windows follow.
+Linux installers, per-user, with a wizard and a command line, launcher
+entries, icons, links on `PATH`, parameters and configuration files.
+System-wide installs, upgrades and Windows follow.
 
 ## Using it
 
 ```bash
-fynstall init                  # writes a commented fynstall.yaml
-fynstall validate              # lists every problem, with line numbers
-fynstall build --cli-only      # dist/<name>-<version>-<os>-<arch>-installer
-                               # and the matching -uninstaller
+fynstall init                    # writes a commented fynstall.yaml
+fynstall validate                # lists every problem, with line numbers
+fynstall build                   # dist/<name>-<version>-<os>-<arch>-installer, with the wizard
+fynstall build --with-cli-only   # and dist/…-cli-installer, without it
+fynstall build --cli-only        # the CLI variant only, for any target
 ```
 
-The installer asks where to install and asks for confirmation. `--yes`
+**The installer picks its front end.** Started from the desktop (no
+terminal, a display), it opens the wizard. Started from a terminal, it runs
+on the command line: it asks where to install, asks for its parameters, and
+asks for confirmation. `--gui` and `--cli` override the choice. `--yes`
 accepts the defaults, `--dry-run` lists every change and makes none, and
-`--dir` chooses the directory. Run `<install directory>/uninstall` to remove
-the program. A newer installer's `--uninstall` runs that same file.
+`--dir` chooses the directory.
+
+**Two variants.** The full installer has the wizard, so it needs cgo to
+build, builds only for the machine that builds it, and needs the graphics
+libraries to start. On a machine without them, such as a server or a slim
+container, it does not start at all: the dynamic loader stops before the
+installer can say anything (`libGL.so.1: cannot open shared object file`).
+Ship the `-cli-installer` for those machines. It has no Fyne and no cgo,
+builds for every target, and runs anywhere.
+
+**Progress.** The wizard shows a bar, the count of files and bytes, and the
+file being written; on a terminal the command line keeps one progress line
+up to date. An install of thousands of files reports each one without
+slowing down.
+
+**Removing it.** Run `<install directory>/uninstall`, or use the Uninstall
+action of the launcher entry. From the desktop it asks once ("Uninstall
+Hello 0.1.0?") and reports; `--yes` skips the question. On the command line
+it does not ask: running it is the decision. A newer installer's
+`--uninstall`, and the uninstaller beside the installer in `dist/`, hand
+over to that same installed file.
 
 Until fynstall has a release, build against a checkout:
-`fynstall build --cli-only --runtime-path <path to fynstall>`.
+`fynstall build --runtime-path <path to fynstall>`.
 
 The config format is in [docs/config.md](docs/config.md).
 
@@ -80,6 +103,18 @@ MIT. See [LICENSE](LICENSE).
 ## Changelog
 
 ### Unreleased
+
+- The wizard: `fynstall build` makes a full installer and uninstaller with
+  the fynedesygn wizard (welcome, licence, settings, location, summary,
+  progress, finish), and `--with-cli-only` the CLI variant beside it. The
+  installer opens the wizard when started from the desktop and runs the
+  command line from a terminal; `--gui` and `--cli` override it. A full
+  build's launcher entry has an Uninstall action. The uninstaller asks once
+  in a small window (fynedesygn `RunConfirm`), and does not ask on the
+  command line; a copy outside an install hands over to the installed one.
+  Installing shows a bar with the count of files and bytes. New keys:
+  `app.licence`, `ui.welcome`, `ui.launch` (spec 001 phase 4 and spec 002
+  phase 2, [#1](https://github.com/ushineko/fynstall/issues/1)).
 
 - Parameters and configuration files: a config declares `parameters`, given
   by flag, by `fynstall-params.yml` beside the installer, at a prompt or by

@@ -58,6 +58,13 @@ is enforced by a test, the test is named.
   its root (`..`, an absolute `dst`, a symlink escape) is refused by
   `validate` and again by `Apply`. Payload content is never run during an
   install.
+- **MSI is the reference, not NSIS.** Install and uninstall behave like
+  Windows Installer: remove only what the install put there, leave and list
+  what the program created, roll back a failed install, keep one record per
+  product. A feature that brings back an NSIS-style hazard (a recursive
+  delete, writing wherever the current directory is, an unchecked script)
+  is a design problem to raise, not a feature to add. Anything destructive
+  is explicit and shown first.
 - **One config for every platform.** Every key in `fynstall.yaml` means
   the same thing on every OS; the OS backends in `platform` do the
   platform-specific work. What a backend can derive (Uninstall registry

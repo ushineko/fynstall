@@ -27,7 +27,7 @@ func TestExecArgumentsAreQuotedAsTheSpecificationSays(t *testing.T) {
 }
 
 func TestABackslashInAQuotedArgumentIsWrittenAsFour(t *testing.T) {
-	b := RenderDesktop(manifest.Desktop{Name: "Hello"}, `/home/a b\c/hello`, "")
+	b := RenderDesktop(manifest.Desktop{Name: "Hello"}, `/home/a b\c/hello`, "", "")
 	require.Contains(t, string(b), `Exec="/home/a b\\\\c/hello"`+"\n")
 }
 
@@ -41,7 +41,7 @@ func TestTheEntryPassesDesktopFileValidate(t *testing.T) {
 		Categories: []string{"Utility"}, Icon: true,
 	}
 	p := filepath.Join(t.TempDir(), "io.example.hello.desktop")
-	require.NoError(t, os.WriteFile(p, RenderDesktop(d, "/home/a b/.local/share/io.example.hello/bin/hello", "io.example.hello"), 0o600))
+	require.NoError(t, os.WriteFile(p, RenderDesktop(d, "/home/a b/.local/share/io.example.hello/bin/hello", "io.example.hello", "/home/a b/.local/share/io.example.hello/uninstall"), 0o600))
 	out, err := exec.CommandContext(t.Context(), tool, p).CombinedOutput()
 	require.NoError(t, err, string(out))
 	require.Empty(t, strings.TrimSpace(string(out)), "no warnings either")

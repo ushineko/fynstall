@@ -184,6 +184,19 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	return p, nil
 }
 
+// DefaultRoot is the install directory m names for scope.
+func DefaultRoot(m *manifest.Manifest, scope string, env func(string) string) (string, error) {
+	vars, err := Vars(m, scope, env)
+	if err != nil {
+		return "", err
+	}
+	root, err := manifest.Expand(m.Dirs[scope], vars)
+	if err != nil {
+		return "", fmt.Errorf("install directory: %w", err)
+	}
+	return root, nil
+}
+
 // Vars are the placeholder values for m in scope: the platform's locations
 // and the app's id, name and version.
 func Vars(m *manifest.Manifest, scope string, env func(string) string) (map[string]string, error) {
@@ -220,7 +233,14 @@ func (p *Plan) addIntegration(vars map[string]string) error {
 		if d.Icon {
 			icon = m.App.ID
 		}
-		b := platform.RenderDesktop(d, p.inRoot(d.Exec), icon)
+		// The launcher's Uninstall action runs the installed uninstaller's
+		// wizard: only a full build has one, and only the main entry, the
+		// one named for the app, carries it.
+		uninstall := ""
+		if m.GUI && d.ID == m.App.ID {
+			uninstall = p.inRoot(UninstallName)
+		}
+		b := platform.RenderDesktop(d, p.inRoot(d.Exec), icon, uninstall)
 		dst := filepath.Join(data, filepath.FromSlash(platform.DesktopPath(d.ID)))
 		if err := p.addFile(PlannedFile{File: contentFile(d.ID+".desktop", b, 0o644), Dst: dst, Base: data, Source: FromContent, Content: b}); err != nil {
 			return err

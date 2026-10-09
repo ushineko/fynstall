@@ -35,6 +35,7 @@ type Config struct {
 	Integration Integration `yaml:"integration"`
 	Parameters  []Parameter `yaml:"parameters"`
 	Actions     []Action    `yaml:"actions"`
+	UI          UI          `yaml:"ui"`
 	Targets     []string    `yaml:"targets"`
 }
 
@@ -85,6 +86,19 @@ type App struct {
 	// Icon is a square PNG of at least MinIconSize pixels, relative to the
 	// config. The build resizes it to the hicolor sizes.
 	Icon string `yaml:"icon"`
+	// Licence is a text or Markdown file the wizard shows, and that must be
+	// accepted before the install goes on.
+	Licence string `yaml:"licence"`
+}
+
+// UI is what the wizard shows.
+type UI struct {
+	// Welcome is a Markdown file for the first page; without it, the page
+	// says what is installed and by whom.
+	Welcome string `yaml:"welcome"`
+	// Launch is a payload destination, which may use build placeholders.
+	// The finish page offers to start it.
+	Launch string `yaml:"launch"`
 }
 
 // Install says where the program goes.

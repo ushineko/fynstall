@@ -11,6 +11,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+
+	"github.com/ushineko/fynstall/manifest"
 )
 
 // EventKind sorts events for a front end.
@@ -23,12 +26,54 @@ const (
 	Detail
 	// Warn is a problem that did not stop the work.
 	Warn
+	// Progress is how far the copying is: Counts and the item in Text.
+	Progress
 )
+
+// Counts are how far an install's copying is.
+type Counts struct {
+	Files, FilesTotal int
+	Bytes, BytesTotal int64
+}
+
+// progressStep is how many bytes of one large file pass between Progress
+// events, so a big file moves the bar while it is copied.
+const progressStep = 1 << 20
 
 // Event is a progress report.
 type Event struct {
 	Kind EventKind
 	Text string
+	// Step is a Step event's position in Steps, or -1 for a step outside
+	// it (the undo of a failed install).
+	Step int
+	// Counts is set on a Progress event.
+	Counts Counts
+}
+
+// The steps of an install, in order. Linking is there only when the
+// install makes links.
+const (
+	StepDirs   = "Creating directories"
+	StepFiles  = "Copying files"
+	StepLinks  = "Linking"
+	StepRecord = "Recording the install"
+)
+
+// Steps names the steps Apply will report for p, so a front end can show
+// them before the install starts.
+func Steps(p *Plan) []string { return stepNames(len(p.Links) > 0) }
+
+// ManifestSteps is Steps before there is a plan: the steps depend only on
+// whether the manifest has links.
+func ManifestSteps(m *manifest.Manifest) []string { return stepNames(len(m.Links) > 0) }
+
+func stepNames(links bool) []string {
+	s := []string{StepDirs, StepFiles}
+	if links {
+		s = append(s, StepLinks)
+	}
+	return append(s, StepRecord)
 }
 
 // Reporter receives events. It is called on the goroutine doing the work.
@@ -36,7 +81,14 @@ type Reporter func(Event)
 
 func (r Reporter) emit(k EventKind, format string, a ...any) {
 	if r != nil {
-		r(Event{Kind: k, Text: fmt.Sprintf(format, a...)})
+		r(Event{Kind: k, Text: fmt.Sprintf(format, a...), Step: -1})
+	}
+}
+
+// step reports the start of the step named name in steps.
+func (r Reporter) step(steps []string, name string) {
+	if r != nil {
+		r(Event{Kind: Step, Text: name, Step: slices.Index(steps, name)})
 	}
 }
 
@@ -48,6 +100,11 @@ func (r Reporter) emit(k EventKind, format string, a ...any) {
 // returns the error, joined with any problem the undo had (R7).
 func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, report Reporter) (rcpt *Receipt, err error) {
 	j := &journal{root: p.Root, report: report}
+	steps := Steps(p)
+	j.counts.FilesTotal = len(p.Files)
+	for _, f := range p.Files {
+		j.counts.BytesTotal += f.Size
+	}
 	defer func() {
 		if err != nil {
 			report.emit(Step, "Undoing the partial install")
@@ -57,7 +114,7 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 		}
 	}()
 
-	report.emit(Step, "Creating directories")
+	report.step(steps, StepDirs)
 	for _, d := range p.Dirs {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("cancelled: %w", err)
@@ -73,7 +130,7 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 		report.emit(Detail, "%s/", d)
 	}
 
-	report.emit(Step, "Copying files")
+	report.step(steps, StepFiles)
 	for _, f := range p.Files {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("cancelled: %w", err)
@@ -81,11 +138,13 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 		if err := j.writePlanned(f, payload, uninstaller); err != nil {
 			return nil, err
 		}
+		j.counts.Files++
+		j.progress(f.Dst)
 		report.emit(Detail, "%s", f.Dst)
 	}
 
 	if len(p.Links) > 0 {
-		report.emit(Step, "Linking")
+		report.step(steps, StepLinks)
 	}
 	for _, l := range p.Links {
 		if err := j.link(l.Dst, l.Target, l.Exists); err != nil {
@@ -94,7 +153,7 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 		report.emit(Detail, "%s -> %s", l.Dst, l.Target)
 	}
 
-	report.emit(Step, "Recording the install")
+	report.step(steps, StepRecord)
 	rcpt = &Receipt{
 		Schema: ReceiptSchema, RuntimeVersion: p.Manifest.RuntimeVersion,
 		App: p.Manifest.App, Scope: p.Scope, Root: p.Root,
@@ -136,23 +195,52 @@ type journal struct {
 	root    string
 	entries []Entry
 	report  Reporter
+	// counts is how far the copying is, for Progress events.
+	counts Counts
+}
+
+func (j *journal) progress(item string) {
+	if j.report != nil {
+		j.report(Event{Kind: Progress, Text: item, Counts: j.counts, Step: -1})
+	}
+}
+
+// counting passes a file's bytes through and counts them into the journal,
+// reporting every progressStep bytes so a large file moves the bar.
+type counting struct {
+	r     io.Reader
+	j     *journal
+	item  string
+	since int
+}
+
+func (c *counting) Read(b []byte) (int, error) {
+	n, err := c.r.Read(b)
+	c.j.counts.Bytes += int64(n)
+	c.since += n
+	if c.since >= progressStep {
+		c.since = 0
+		c.j.progress(c.item)
+	}
+	return n, err //nolint:wrapcheck // a Read must return the reader's own io.EOF
 }
 
 func (j *journal) add(e Entry) { j.entries = append(j.entries, e) }
 
 func (j *journal) writePlanned(f PlannedFile, payload fs.FS, uninstaller []byte) error {
+	count := func(r io.Reader) io.Reader { return &counting{r: r, j: j, item: f.Dst} }
 	switch f.Source {
 	case FromUninstaller:
-		return j.write(f.Dst, bytes.NewReader(uninstaller), f.SHA256, os.FileMode(f.Mode), f.Exists)
+		return j.write(f.Dst, count(bytes.NewReader(uninstaller)), f.SHA256, os.FileMode(f.Mode), f.Exists)
 	case FromContent:
-		return j.write(f.Dst, bytes.NewReader(f.Content), f.SHA256, os.FileMode(f.Mode), f.Exists)
+		return j.write(f.Dst, count(bytes.NewReader(f.Content)), f.SHA256, os.FileMode(f.Mode), f.Exists)
 	}
 	src, err := payload.Open(f.Path)
 	if err != nil {
 		return fmt.Errorf("open payload %s: %w", f.Path, err)
 	}
 	defer func() { _ = src.Close() }()
-	return j.write(f.Dst, src, f.SHA256, os.FileMode(f.Mode), f.Exists)
+	return j.write(f.Dst, count(src), f.SHA256, os.FileMode(f.Mode), f.Exists)
 }
 
 // write puts r at dst. What is already there is saved first and the change

@@ -120,7 +120,8 @@ func buildCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fl.StringVar(&o.Config, "c", "fynstall.yaml", "config to build")
 	fl.StringVar(&o.OutDir, "o", "", "output directory (default: dist beside the config)")
 	fl.Var(&targets, "target", "os/arch to build for; repeat for more (default: the config's targets, else this machine)")
-	fl.BoolVar(&o.CLIOnly, "cli-only", false, "build without the wizard: no Fyne, no cgo, no graphics libraries")
+	fl.BoolVar(&o.CLIOnly, "cli-only", false, "build only the CLI variant: no wizard, no Fyne, no cgo, no graphics libraries")
+	fl.BoolVar(&o.WithCLIOnly, "with-cli-only", false, "build the CLI variant as well as the full one")
 	fl.StringVar(&o.RuntimePath, "runtime-path", "", "a fynstall checkout to build the installers against, instead of this fynstall's release")
 	fl.BoolVar(&verbose, "v", false, "show the go command's output")
 	if fl.Parse(args) != nil {
