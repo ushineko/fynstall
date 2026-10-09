@@ -20,7 +20,7 @@ is enforced by a test, the test is named.
   specified.
 - **Window**: built on `github.com/ushineko/fynedesygn`, whose
   `docs/design-system.md` governs the window's shell, theme and widgets. The
-  wizard is fynedesygn's `wizard` package (fynedesygn spec 056). A shape the
+  wizard is fynedesygn's `wizard` package (fynedesygn spec 061). A shape the
   library lacks is a library change, not a local copy.
 - **Source of record for decisions**: the specs in `specs/`, starting with
   `specs/001-installer-prototype.md`, and `docs/architecture.md` once it
