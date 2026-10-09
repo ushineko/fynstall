@@ -204,9 +204,11 @@ upgrade, and only the names of secret ones.
 ## actions
 
 Changes an install makes beyond copying files. Each action is recorded with
-its undo, as a file is, so the uninstaller reverses it. `config_file` is
-the only type so far; `service`, `run` and `migrate` come with spec 002
-phase 4.
+its undo, as a file is, so the uninstaller reverses it. The installer lists
+every action before it starts: in `--dry-run`, before its question, and on
+the wizard's summary page. Actions run in the order the config gives them,
+after the files are in place. The uninstaller undoes them in reverse,
+before it removes any file. A failed install undoes the actions it took.
 
 ```yaml
 actions:
@@ -215,6 +217,21 @@ actions:
       values:
         greeting: "{param:greeting}"
         token: "{param:token}"
+  - service:
+      name: beacon
+      exec: bin/beacon
+      args: [serve]
+  - run:
+      exec: bin/beacon
+      args: [setup, "{config}/beacon/setup-done"]
+      undo: [teardown, "{config}/beacon/setup-done"]
+  - run:
+      on: uninstall
+      exec: bin/beacon
+      args: [goodbye]
+  - migrate:
+      from: "{data}/beacon-0"
+      to: "{data}/{id}/data"
 ```
 
 **config_file** writes a configuration file from parameters, so the
@@ -230,6 +247,65 @@ installer does not run the program to produce one.
 - The uninstaller removes the file unless its path is under
   `keep_on_uninstall`. Keep it when the configuration must outlive an
   uninstall, or an upgrade, which runs the old uninstaller first.
+
+**service** runs a payload program as a service.
+
+| Key | Meaning |
+|---|---|
+| `name` | The service's name: letters, digits, `_`, `.` and `-`. |
+| `description` | One line. The default is `app.name`. |
+| `exec` | The payload destination to run. It can use `{os}`, `{arch}` and `{exe}`. |
+| `args` | Its arguments. They can use the path placeholders. |
+| `start` | Start it after the install. The default is `true`. |
+| `restart` | `no`, `on-failure` (the default) or `always`. |
+
+On Linux, a per-user install writes a systemd user unit,
+`{config}/systemd/user/<name>.service`, and enables it, so it starts at
+login. The uninstaller stops, disables and removes it. If a unit of that
+name was there before, the install saves it, and the uninstaller puts it
+back, enabled and running again if it was. The install needs `systemctl`
+on `PATH`. A system install's service comes with system scope.
+
+**run** runs a payload program, never a shell, in the install directory.
+It is the last resort for a change no other action makes: the installer
+cannot see what a program changed, so it shows the command before it runs
+it.
+
+| Key | Meaning |
+|---|---|
+| `exec` | The payload destination to run. It can use `{os}`, `{arch}` and `{exe}`. |
+| `args` | Its arguments. They can use the path placeholders and `{param:<name>}`. |
+| `undo` | The arguments that undo it, or the word `none`. Required. |
+| `on` | `install` (the default) or `uninstall`. |
+| `continue_on_error` | For `on: uninstall` only: let the uninstall go on when the program fails. |
+
+- With `on: install`, the program runs during the install. A failure fails
+  the install, which is undone, this program's own `undo` included. The
+  uninstaller runs `undo`. Its output is shown with `--verbose`, and its
+  last lines are part of the error when it fails.
+- With `on: uninstall`, the program is an uninstall hook. It runs before
+  the uninstaller removes anything, while the program's files are still
+  there: for something the program made at runtime that the install cannot
+  know about. A failure stops the uninstall with nothing removed, unless
+  `continue_on_error: true`. The uninstaller says it will run it before it
+  does.
+- A secret parameter cannot be an argument. Arguments show in the process
+  list, and an `undo` is kept in the install's record. Pass a secret
+  through a `config_file`.
+- `before_install` and `after_install` come with Go extensions (spec 003).
+
+**migrate** moves data that an older version kept elsewhere.
+
+- `from` and `to` start with `{config}/`, `{data}/` or `{home}/`.
+- `to` must be at or under a `keep_on_uninstall` path, so the uninstaller
+  leaves the moved data.
+- When nothing is at `from`, the action does nothing. When both exist, the
+  install is refused before it starts.
+- A failed install moves the data back. An uninstall does not.
+
+**One at a time.** While an installer or uninstaller of an app runs, a
+second one for the same app and scope is refused. The lock is in
+`$XDG_RUNTIME_DIR/fynstall`, so it leaves nothing in the home.
 
 ## uninstall
 
@@ -316,6 +392,7 @@ Outside it:
 - `{data}/applications/<id>.desktop` for each desktop entry.
 - `{data}/icons/hicolor/<size>x<size>/apps/<app id>.png` for each icon size.
 - `{bin}/<name>` for each link.
+- `{config}/systemd/user/<name>.service` for each service, on Linux.
 
 A file or link that is already at one of these paths is saved first. A
 link is saved as its target, so the uninstaller puts back a link and not a

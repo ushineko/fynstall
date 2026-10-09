@@ -219,7 +219,6 @@ func TestParametersAndConfigFilesAreChecked(t *testing.T) {
 		{"a path inside nothing", "actions:\n  - config_file:\n      path: /etc/hello.yml\n      values: {a: b}\n", "actions[0].config_file.path", "must start with {config}/", 10},
 		{"no format", "actions:\n  - config_file:\n      path: \"{config}/hello/config\"\n      values: {a: b}\n", "actions[0].config_file.format", "say format", 9},
 		{"an undeclared parameter", "actions:\n  - config_file:\n      path: \"{config}/hello.json\"\n      values: {a: \"{param:nope}\"}\n", "actions[0].config_file.values.a", "{param:nope} names no parameter", 11},
-		{"a later action type", "actions:\n  - service:\n      name: hello\n", "actions[0]", "arrive in spec 002 phase 4", 9},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,6 +233,52 @@ func TestParametersAndConfigFilesAreChecked(t *testing.T) {
 			require.Equal(t, tc.field, errs[0].Field)
 			require.Equal(t, tc.line, errs[0].Line, "%v", errs[0])
 			require.Contains(t, errs[0].Msg, tc.want)
+		})
+	}
+}
+
+func TestActionsAreChecked(t *testing.T) {
+	head := "app:\n  id: io.example.hello\n  name: Hello\n  version: 0.1.0\npayload:\n  - src: bin/hello\n    dst: bin/hello\n" +
+		"parameters:\n  - name: server\n    default: x\n  - name: token\n    secret: true\n" +
+		"integration:\n  keep_on_uninstall: [\"{data}/{id}/data\"]\n"
+	// head is 14 lines; the actions start on line 15.
+	cases := []struct {
+		name, extra, field, want string
+		line                     int
+	}{
+		{"valid actions", "actions:\n  - service:\n      name: hello\n      exec: bin/hello\n      args: [serve]\n" +
+			"  - run:\n      exec: bin/hello\n      args: [setup, \"{param:server}\"]\n      undo: [teardown]\n" +
+			"  - run:\n      exec: bin/hello\n      undo: none\n" +
+			"  - run:\n      on: uninstall\n      exec: bin/hello\n      args: [stop]\n      continue_on_error: true\n" +
+			"  - migrate:\n      from: \"{data}/old-hello\"\n      to: \"{data}/{id}/data/old\"\n", "", "", 0},
+		{"a bad service name", "actions:\n  - service:\n      name: hello.service\n      exec: bin/hello\n", "actions[0].service.name", "not a service name", 17},
+		{"an exec outside", "actions:\n  - service:\n      name: hello\n      exec: ../hello\n", "actions[0].service.exec", "leaves the install directory", 18},
+		{"a bad restart", "actions:\n  - service:\n      name: hello\n      exec: bin/hello\n      restart: sometimes\n", "actions[0].service.restart", "not one of", 19},
+		{"no undo", "actions:\n  - run:\n      exec: bin/hello\n", "actions[0].run.undo", "required", 16},
+		{"a bad undo", "actions:\n  - run:\n      exec: bin/hello\n      undo: never\n", "", "the word none", 0},
+		{"a secret argument", "actions:\n  - run:\n      exec: bin/hello\n      args: [\"--token={param:token}\"]\n      undo: none\n", "actions[0].run.args", "is secret", 18},
+		{"a secret in undo", "actions:\n  - run:\n      exec: bin/hello\n      undo: [\"{param:token}\"]\n", "actions[0].run.undo", "is secret", 18},
+		{"a later hook point", "actions:\n  - run:\n      on: after_install\n      exec: bin/hello\n", "actions[0].run.on", "spec 003", 17},
+		{"an undo on a hook", "actions:\n  - run:\n      on: uninstall\n      exec: bin/hello\n      undo: none\n", "actions[0].run.undo", "nothing to undo", 19},
+		{"a migrate into nothing kept", "actions:\n  - migrate:\n      from: \"{data}/old\"\n      to: \"{data}/{id}/new\"\n", "actions[0].migrate.to", "keep_on_uninstall", 18},
+		{"a migrate from a system path", "actions:\n  - migrate:\n      from: /var/lib/old\n      to: \"{data}/{id}/data\"\n", "actions[0].migrate.from", "must start with", 17},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(write(t, head+tc.extra))
+			if tc.want == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.want)
+			if tc.field == "" {
+				return
+			}
+			var errs Errors
+			require.True(t, errors.As(err, &errs), "%v", err)
+			require.Len(t, errs, 1, "%v", errs)
+			require.Equal(t, tc.field, errs[0].Field)
+			require.Equal(t, tc.line, errs[0].Line, "%v", errs[0])
 		})
 	}
 }

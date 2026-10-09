@@ -26,6 +26,15 @@ const (
 	// OpReplace is an existing file Apply replaced, keeping a copy at
 	// Backup, relative to the backup directory. Undo: put the copy back.
 	OpReplace Op = "replace"
+	// OpService is a service the install set up, its unit file at Path.
+	// Undo: stop and remove it, and put back a service it replaced.
+	OpService Op = "service"
+	// OpRun is a run action. Undo: run its program with its undo
+	// arguments.
+	OpRun Op = "run"
+	// OpMigrate is data moved from From to Path. Undo, only for a failed
+	// install: move it back. Path is kept, so an uninstall leaves it.
+	OpMigrate Op = "migrate"
 )
 
 // Entry is one change Apply made.
@@ -36,6 +45,10 @@ type Entry struct {
 	// OldLink is the target of a symlink that a replace removed. A link is
 	// put back as a link, not as a copy of what it pointed at.
 	OldLink string `json:"old_link,omitempty"`
+	// Service, Run and From are set on the action entries of their Op.
+	Service *ServiceEntry `json:"service,omitempty"`
+	Run     *RunEntry     `json:"run,omitempty"`
+	From    string        `json:"from,omitempty"`
 }
 
 // Receipt is what an install leaves at <root>/.fynstall/receipt.json, and
@@ -57,8 +70,10 @@ type Receipt struct {
 	// Remove are the uninstall.remove patterns, relative to Root: files the
 	// program makes, which the uninstaller removes without asking (spec 002
 	// D5).
-	Remove  []string `json:"uninstall_remove,omitempty"`
-	Journal []Entry  `json:"journal"`
+	Remove []string `json:"uninstall_remove,omitempty"`
+	// Hooks run before the uninstaller removes anything.
+	Hooks   []Hook  `json:"uninstall_hooks,omitempty"`
+	Journal []Entry `json:"journal"`
 }
 
 // Index is the install index entry: where to find an install of an app.

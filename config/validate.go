@@ -384,9 +384,12 @@ func FileFormat(a *FileAction) string {
 
 func (k *checker) actions(c *Config) {
 	params := map[string]bool{}
+	byName := map[string]Parameter{}
 	for _, p := range c.Parameters {
 		params[p.Name] = true
+		byName[p.Name] = p
 	}
+	services := map[string]bool{}
 	for i, a := range c.Actions {
 		field := fmt.Sprintf("actions[%d]", i)
 		n := 0
@@ -399,11 +402,121 @@ func (k *checker) actions(c *Config) {
 			k.fail(k.line("actions", i), field, "an action is exactly one of config_file, service, run or migrate")
 			continue
 		}
-		if a.ConfigFile == nil {
-			k.fail(k.line("actions", i), field, "service, run and migrate actions arrive in spec 002 phase 4")
-			continue
+		switch {
+		case a.ConfigFile != nil:
+			k.configFile(a.ConfigFile, field+".config_file", params, "actions", i, "config_file")
+		case a.Service != nil:
+			k.service(a.Service, field+".service", services, "actions", i, "service")
+		case a.Run != nil:
+			k.run(a.Run, field+".run", byName, "actions", i, "run")
+		case a.Migrate != nil:
+			k.migrate(c, a.Migrate, field+".migrate", "actions", i, "migrate")
 		}
-		k.configFile(a.ConfigFile, field+".config_file", params, "actions", i, "config_file")
+	}
+}
+
+var (
+	serviceNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+	restarts      = []string{"no", "on-failure", "always"}
+)
+
+func (k *checker) service(s *ServiceAction, field string, seen map[string]bool, keys ...any) {
+	at := func(key string) int { return k.line(append(keys, key)...) }
+	switch {
+	case !serviceNameRE.MatchString(s.Name) || strings.HasSuffix(s.Name, ".service"):
+		k.fail(at("name"), field+".name", "%q is not a service name such as hello (letters, digits, _ . -; no .service)", s.Name)
+	case seen[s.Name]:
+		k.fail(at("name"), field+".name", "two services are named %q", s.Name)
+	}
+	seen[s.Name] = true
+	k.exec(s.Exec, field+".exec", append(keys, "exec")...)
+	for j, a := range s.Args {
+		if unknown := manifest.Unknown(a); len(unknown) > 0 {
+			k.fail(k.line(append(keys, "args", j)...), field+".args", "unknown placeholder {%s}", strings.Join(unknown, "}, {"))
+		}
+	}
+	if !slices.Contains(restarts, s.RestartPolicy()) {
+		k.fail(at("restart"), field+".restart", "%q is not one of %s", s.Restart, strings.Join(restarts, ", "))
+	}
+	if strings.ContainsFunc(s.Description, unicode.IsControl) {
+		k.fail(at("description"), field+".description", "must be one line of text")
+	}
+}
+
+func (k *checker) run(r *RunAction, field string, params map[string]Parameter, keys ...any) {
+	at := func(key string) int { return k.line(append(keys, key)...) }
+	switch r.On {
+	case "", "install":
+		if !r.Undo.Set {
+			k.fail(k.line(keys...), field+".undo", "required: the arguments that undo this run, or none")
+		}
+		if r.ContinueOnError {
+			k.fail(at("continue_on_error"), field+".continue_on_error", "only an on: uninstall hook can go on after it fails; a failed install is undone")
+		}
+	case "uninstall":
+		if r.Undo.Set {
+			k.fail(at("undo"), field+".undo", "an on: uninstall hook has nothing to undo")
+		}
+	case "before_install", "after_install":
+		k.fail(at("on"), field+".on", "%s hooks arrive with Go extensions (spec 003); this version runs install and uninstall", r.On)
+	default:
+		k.fail(at("on"), field+".on", "%q is not install or uninstall", r.On)
+	}
+	k.exec(r.Exec, field+".exec", append(keys, "exec")...)
+	check := func(args []string, key string) {
+		for j, a := range args {
+			for _, name := range manifest.UnknownIn(a, manifest.Placeholders) {
+				ref, ok := strings.CutPrefix(name, "param:")
+				p, known := params[ref]
+				switch {
+				case !ok:
+					k.fail(k.line(append(keys, key, j)...), field+"."+key, "unknown placeholder {%s}", name)
+				case !known:
+					k.fail(k.line(append(keys, key, j)...), field+"."+key, "{param:%s} names no parameter", ref)
+				case p.Secret:
+					k.fail(k.line(append(keys, key, j)...), field+"."+key,
+						"{param:%s} is secret: arguments show in the process list and an undo is kept in the receipt; pass it through a config_file", ref)
+				}
+			}
+		}
+	}
+	check(r.Args, "args")
+	check(r.Undo.Args, "undo")
+}
+
+// exec checks a payload destination an action runs.
+func (k *checker) exec(exec, field string, keys ...any) {
+	if strings.TrimSpace(exec) == "" {
+		k.fail(k.line(keys...), field, "required")
+		return
+	}
+	if !k.buildTemplate(exec, field, keys...) {
+		if msg := CheckDst(exec); msg != "" {
+			k.fail(k.line(keys...), field, "%s", msg)
+		}
+	}
+}
+
+func (k *checker) migrate(c *Config, m *MigrateAction, field string, keys ...any) {
+	at := func(key string) int { return k.line(append(keys, key)...) }
+	for key, p := range map[string]string{"from": m.From, "to": m.To} {
+		base, rest, _ := strings.Cut(p, "/")
+		if !strings.HasPrefix(base, "{") || !slices.Contains(FileBases, strings.Trim(base, "{}")) || rest == "" {
+			k.fail(at(key), field+"."+key, "%q must start with {config}/, {data}/ or {home}/", p)
+		} else if unknown := manifest.Unknown(p); len(unknown) > 0 {
+			k.fail(at(key), field+"."+key, "unknown placeholder {%s}", strings.Join(unknown, "}, {"))
+		} else if clean := path.Clean(rest); clean == ".." || strings.HasPrefix(clean, "../") {
+			k.fail(at(key), field+"."+key, "%q leaves the directory it starts in", p)
+		}
+	}
+	kept := false
+	for _, keep := range c.Integration.KeepOnUninstall {
+		if m.To == keep || strings.HasPrefix(m.To, strings.TrimSuffix(keep, "/")+"/") {
+			kept = true
+		}
+	}
+	if !kept {
+		k.fail(at("to"), field+".to", "%q must be at or under a keep_on_uninstall path, so the uninstaller leaves the moved data", m.To)
 	}
 }
 

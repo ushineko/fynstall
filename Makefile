@@ -108,6 +108,10 @@ greet: ## Build examples/greet for each target into examples/greet/build/
 		echo "  examples/greet/build/$$os-$$arch/greet$$ext"; \
 	done
 
+.PHONY: beacon
+beacon: ## Build examples/beacon into examples/beacon/bin/, for the actions example
+	CGO_ENABLED=0 go build $(GOFLAGS) -o examples/beacon/bin/beacon ./examples/beacon
+
 .PHONY: tidy
 tidy: ## go mod tidy
 	go mod tidy

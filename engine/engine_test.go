@@ -475,3 +475,44 @@ func TestAKeptPathIsNeitherALeftoverNorRemovedByAPattern(t *testing.T) {
 	_, err = os.Stat(state)
 	require.NoError(t, err)
 }
+
+func TestTheLockRefusesASecondHolderUntilReleased(t *testing.T) {
+	dir := t.TempDir()
+	env := func(k string) string { return map[string]string{"XDG_RUNTIME_DIR": dir}[k] }
+	unlock, err := Lock("io.example.hello", "user", env)
+	require.NoError(t, err)
+	_, err = Lock("io.example.hello", "user", env)
+	require.ErrorIs(t, err, ErrLocked)
+	other, err := Lock("io.example.other", "user", env)
+	require.NoError(t, err, "another app has its own lock")
+	other()
+	unlock()
+	again, err := Lock("io.example.hello", "user", env)
+	require.NoError(t, err)
+	again()
+}
+
+func TestAMigrateWhoseTwoEndsExistIsRefused(t *testing.T) {
+	f := newFixture(t)
+	f.m.Actions = []manifest.Action{{Migrate: &manifest.Migrate{From: "{data}/old", To: "{config}/hello/data"}}}
+	write(t, filepath.Join(f.home, ".local", "share", "old", "a"), "a")
+	write(t, filepath.Join(f.home, ".config", "hello", "data", "b"), "b")
+	_, err := NewPlan(f.m, Options{Env: f.env})
+	require.ErrorContains(t, err, "both")
+}
+
+// A run action that fails carries its last output lines, and the install
+// it was part of is undone, its own undo included.
+func TestAFailingRunCarriesItsOutputAndIsUndone(t *testing.T) {
+	f := newFixture(t)
+	marker := filepath.Join(f.home, "undone")
+	f.add("bin/setup", "#!/bin/sh\nif [ \"$1\" = undo ]; then : > \""+marker+"\"; exit 0; fi\necho one; echo two >&2; exit 3\n", 0o755)
+	f.m.Actions = []manifest.Action{{Run: &manifest.Run{Exec: "bin/setup", Undo: []string{"undo"}}}}
+	before := f.snap(t)
+	_, err := f.install(t)
+	require.ErrorContains(t, err, "setup: exit status 3: one / two")
+	_, statErr := os.Stat(marker)
+	require.NoError(t, statErr, "the failed run's undo ran")
+	require.NoError(t, os.Remove(marker))
+	require.Equal(t, before, f.snap(t))
+}

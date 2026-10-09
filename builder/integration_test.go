@@ -45,7 +45,8 @@ var (
 	fullCLI    builder.Artifact // the CLI variant from the same build
 	greetAMD64 builder.Artifact
 	greetARM64 builder.Artifact
-	src        string // the staged copy of examples/hello: config, README, bin/hello
+	beacon     builder.Artifact // examples/beacon: actions
+	src        string           // the staged copy of examples/hello: config, README, bin/hello
 	v1Art      builder.Artifact
 	v1Again    builder.Artifact
 	v2Art      builder.Artifact
@@ -118,7 +119,40 @@ func setup(work string) error {
 		return fmt.Errorf("full build: want the full variant then the CLI one, got %+v", arts)
 	}
 	full, fullCLI = arts[0], arts[1]
+	if err := setupBeacon(repo, work); err != nil {
+		return err
+	}
 	return setupGreet(repo, work)
+}
+
+// setupBeacon builds examples/beacon, pure Go, and its CLI-only installer.
+func setupBeacon(repo, work string) error {
+	dir := filepath.Join(work, "beacon")
+	b, err := os.ReadFile(filepath.Join(repo, "examples", "beacon", "fynstall.yaml"))
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fynstall.yaml"), b, 0o600); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-trimpath", "-o", filepath.Join(dir, "bin", "beacon"), "./examples/beacon")
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("build beacon: %w\n%s", err, out)
+	}
+	arts, err := builder.Build(context.Background(), builder.Options{
+		Config: filepath.Join(dir, "fynstall.yaml"), OutDir: filepath.Join(work, "beacon-dist"),
+		CLIOnly: true, RuntimePath: repo, RuntimeVersion: v1, Env: []string{"GOPROXY=off"},
+	})
+	if err != nil {
+		return err
+	}
+	beacon = arts[0]
+	return nil
 }
 
 // setupGreet builds examples/greet for linux/amd64 and linux/arm64, pure Go
@@ -169,13 +203,15 @@ type home struct {
 	dir  string
 	root string
 	path string
+	// rundir is XDG_RUNTIME_DIR, where the install lock goes.
+	rundir string
 }
 
 func newHome(t *testing.T) home {
 	t.Helper()
 	require.NoError(t, setupFail)
 	d := t.TempDir()
-	return home{dir: d, root: filepath.Join(d, ".local", "share", "io.ushineko.hello"), path: t.TempDir()}
+	return home{dir: d, root: filepath.Join(d, ".local", "share", "io.ushineko.hello"), path: t.TempDir(), rundir: t.TempDir()}
 }
 
 func (h home) data(rel string) string {
@@ -183,12 +219,12 @@ func (h home) data(rel string) string {
 }
 func (h home) link() string { return filepath.Join(h.dir, ".local", "bin", "hello") }
 
-// run starts a program with only HOME and PATH set and no terminal, and
+// run starts a program with only HOME, PATH and XDG_RUNTIME_DIR set and no terminal, and
 // returns its exit code and combined output.
 func (h home) run(t *testing.T, prog string, args ...string) (int, string) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), prog, args...)
-	cmd.Env = []string{"HOME=" + h.dir, "PATH=" + h.path}
+	cmd.Env = []string{"HOME=" + h.dir, "PATH=" + h.path, "XDG_RUNTIME_DIR=" + h.rundir}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()

@@ -249,6 +249,13 @@ func (s *summaryPage) Enter(w *wizard.Wizard) {
 	for _, r := range replaced {
 		rows = append(rows, widgets.PlainRow("Replaces", r+" (put back on uninstall)"))
 	}
+	for _, a := range actionLines(g.plan) {
+		label, text, _ := strings.Cut(a, " ")
+		if strings.HasPrefix(a, "on uninstall") {
+			label, text = "On uninstall", strings.TrimPrefix(a, "on uninstall, ")
+		}
+		rows = append(rows, widgets.PlainRow(gloss[label], strings.TrimSpace(text)))
+	}
 	s.box.Objects = rows
 	s.box.Refresh()
 }
@@ -256,6 +263,11 @@ func (s *summaryPage) Enter(w *wizard.Wizard) {
 // job installs the plan the summary page made, reporting the engine's
 // steps and files to the progress page.
 func (g *installWizard) job(ctx context.Context, r *wizard.Reporter) error {
+	unlock, err := engine.Lock(g.m.App.ID, g.plan.Scope, g.e.Getenv)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	last := -1
 	report := func(ev engine.Event) {
 		switch ev.Kind {
@@ -365,8 +377,8 @@ func notice(title, text string) {
 
 // uninstallGUI asks once, removes, and reports, in one small window
 // (fynedesygn spec 062). skip is --yes: the window shows only the result.
-func uninstallGUI(r *engine.Receipt, skip bool) int {
-	res := wizard.RunConfirm(uninstallConfirm(r, skip))
+func uninstallGUI(r *engine.Receipt, skip bool, env func(string) string) int {
+	res := wizard.RunConfirm(uninstallConfirm(r, skip, env))
 	if res.Outcome != wizard.Finished {
 		return exitFail
 	}
@@ -388,15 +400,24 @@ func leftoversDetail(left []engine.Leftover) string {
 	return b.String()
 }
 
+// gloss labels the summary rows of the actions by the word actionLines
+// starts each line with.
+var gloss = map[string]string{ //nolint:gochecknoglobals // a fixed table
+	"service": "Service", "run": "Runs", "move": "Moves", "On uninstall": "On uninstall",
+}
+
 // shownLeftoversGUI is how many leftovers the window lists by name.
 const shownLeftoversGUI = 50
 
 // uninstallConfirm is the uninstaller's question, its job and its result.
 // When the program left files the install did not create, the window then
 // lists them and offers to remove them too (spec 002 D5).
-func uninstallConfirm(r *engine.Receipt, skip bool) wizard.ConfirmOptions {
+func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) wizard.ConfirmOptions {
 	var left []engine.Leftover
 	detail := fmt.Sprintf("It removes `%s`, and puts back anything its install replaced.", r.Root)
+	for _, h := range r.Hooks {
+		detail += fmt.Sprintf("\n\nBefore removing anything, it runs `%s`.", commandLine(h.Exec, h.Args))
+	}
 	for _, k := range r.Keep {
 		detail += fmt.Sprintf("\n\nYour data in `%s`, if any, is left where it is.", k)
 	}
@@ -410,7 +431,11 @@ func uninstallConfirm(r *engine.Receipt, skip bool) wizard.ConfirmOptions {
 		SkipQuestion: skip,
 		Job: func(context.Context) error {
 			report := func(engine.Event) {}
-			var err error
+			unlock, err := engine.Lock(r.App.ID, r.Scope, env)
+			if err != nil {
+				return err
+			}
+			defer unlock()
 			if left, err = engine.Uninstall(r, report); err != nil {
 				return err
 			}

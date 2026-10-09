@@ -54,24 +54,34 @@ type Event struct {
 // The steps of an install, in order. Linking is there only when the
 // install makes links.
 const (
-	StepDirs   = "Creating directories"
-	StepFiles  = "Copying files"
-	StepLinks  = "Linking"
-	StepRecord = "Recording the install"
+	StepDirs    = "Creating directories"
+	StepFiles   = "Copying files"
+	StepLinks   = "Linking"
+	StepActions = "Configuring"
+	StepRecord  = "Recording the install"
 )
 
 // Steps names the steps Apply will report for p, so a front end can show
 // them before the install starts.
-func Steps(p *Plan) []string { return stepNames(len(p.Links) > 0) }
+func Steps(p *Plan) []string { return stepNames(len(p.Links) > 0, len(p.Actions) > 0) }
 
 // ManifestSteps is Steps before there is a plan: the steps depend only on
-// whether the manifest has links.
-func ManifestSteps(m *manifest.Manifest) []string { return stepNames(len(m.Links) > 0) }
+// whether the manifest has links and actions other than uninstall hooks.
+func ManifestSteps(m *manifest.Manifest) []string {
+	actions := false
+	for _, a := range m.Actions {
+		actions = actions || a.Run == nil || !a.Run.Hook
+	}
+	return stepNames(len(m.Links) > 0, actions)
+}
 
-func stepNames(links bool) []string {
+func stepNames(links, actions bool) []string {
 	s := []string{StepDirs, StepFiles}
 	if links {
 		s = append(s, StepLinks)
+	}
+	if actions {
+		s = append(s, StepActions)
 	}
 	return append(s, StepRecord)
 }
@@ -159,12 +169,24 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 		report.emit(Detail, "%s -> %s", l.Dst, l.Target)
 	}
 
+	if len(p.Actions) > 0 {
+		report.step(steps, StepActions)
+	}
+	for _, a := range p.Actions {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("cancelled: %w", err)
+		}
+		if err := j.apply(ctx, a); err != nil {
+			return nil, err
+		}
+	}
+
 	report.step(steps, StepRecord)
 	rcpt = &Receipt{
 		Schema: ReceiptSchema, RuntimeVersion: p.Manifest.RuntimeVersion,
 		App: p.Manifest.App, Scope: p.Scope, Root: p.Root,
 		Uninstaller: filepath.Join(p.Root, UninstallName), Index: p.Index, Keep: p.Keep,
-		RefreshMenu: p.RefreshMenu, Remove: p.Manifest.UninstallRemove,
+		RefreshMenu: p.RefreshMenu, Remove: p.Manifest.UninstallRemove, Hooks: p.Hooks,
 	}
 	for _, d := range p.Manifest.Parameters {
 		if d.Secret {
@@ -307,9 +329,11 @@ func (j *journal) undo(keep []string) error {
 	return nil
 }
 
-// undoFiles removes the files the journal created and puts back those it
-// replaced, newest first. Problems are collected, not fatal, so one stuck
-// file does not leave the rest.
+// undoFiles reverses every entry but the directories, newest first: it
+// removes the files the journal created, puts back those it replaced, and
+// undoes the actions, which come after the files and so go first.
+// Problems are collected, not fatal, so one stuck file does not leave the
+// rest.
 func (j *journal) undoFiles(keep []string) error {
 	var errs []error
 	for i := len(j.entries) - 1; i >= 0; i-- {
@@ -328,6 +352,8 @@ func (j *journal) undoFiles(keep []string) error {
 		case OpReplace:
 			err = j.restore(e)
 			j.report.emit(Detail, "restored %s", e.Path)
+		default:
+			err = j.undoAction(e)
 		}
 		if err != nil {
 			errs = append(errs, err)

@@ -54,6 +54,8 @@ type Manifest struct {
 	Parameters []Parameter `json:"parameters,omitempty"`
 	// ConfigFiles are written from parameters at install time.
 	ConfigFiles []ConfigFile `json:"config_files,omitempty"`
+	// Actions are the service, run and migrate actions, in config order.
+	Actions []Action `json:"actions,omitempty"`
 	// Licence and Welcome are the texts the wizard shows.
 	Licence string `json:"licence,omitempty"`
 	Welcome string `json:"welcome,omitempty"`
@@ -81,6 +83,46 @@ type ConfigFile struct {
 	Path   string            `json:"path"`
 	Format string            `json:"format"`
 	Values map[string]string `json:"values"`
+}
+
+// Action is one service, run or migrate action (spec 002 D2a). Exactly
+// one field is set.
+type Action struct {
+	Service *Service `json:"service,omitempty"`
+	Run     *Run     `json:"run,omitempty"`
+	Migrate *Migrate `json:"migrate,omitempty"`
+}
+
+// Service runs the payload file Exec as a service.
+type Service struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Exec        string   `json:"exec"`
+	Args        []string `json:"args,omitempty"`
+	Start       bool     `json:"start,omitempty"`
+	// Restart is no, on-failure or always.
+	Restart string `json:"restart"`
+}
+
+// Run runs the payload file Exec. Args and Undo may use {param:<name>}
+// for a non-secret parameter, and the path placeholders.
+type Run struct {
+	// Hook is true for on: uninstall: it runs before the uninstaller
+	// removes anything, and has no undo.
+	Hook bool     `json:"hook,omitempty"`
+	Exec string   `json:"exec"`
+	Args []string `json:"args,omitempty"`
+	// Undo are the arguments that undo the run; NoUndo says the config
+	// chose none.
+	Undo            []string `json:"undo,omitempty"`
+	NoUndo          bool     `json:"no_undo,omitempty"`
+	ContinueOnError bool     `json:"continue_on_error,omitempty"`
+}
+
+// Migrate moves From to To, path templates; To is kept on uninstall.
+type Migrate struct {
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 // IconDir is where the builder puts the resized icons in the embedded

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 
 	"github.com/ushineko/fynstall/engine"
 	"github.com/ushineko/fynstall/manifest"
@@ -114,6 +115,14 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
 		return exitUsage
 	}
+	if !f.dryRun {
+		unlock, err := engine.Lock(m.App.ID, f.scope, e.Getenv)
+		if err != nil {
+			_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
+			return exitFail
+		}
+		defer unlock()
+	}
 	o := engine.Options{Scope: f.scope, Root: f.dir, Env: e.Getenv, Uninstaller: p.Uninstaller, Params: params}
 	plan, err := engine.NewPlan(m, o)
 	if err != nil {
@@ -209,6 +218,10 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 	for _, r := range replaced {
 		_, _ = fmt.Fprintf(e.Out, "  replaces %s (the uninstaller puts it back)\n", r)
 	}
+	// Actions are always shown: a run action runs a payload program.
+	for _, a := range actionLines(p) {
+		_, _ = fmt.Fprintf(e.Out, "  %s\n", a)
+	}
 	if !all {
 		return
 	}
@@ -235,6 +248,46 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 	}
 	_, _ = fmt.Fprintf(e.Out, "  create   %s\n", p.Index)
 	_, _ = fmt.Fprintf(e.Out, "  create   %s\n", engine.ReceiptPath(p.Root))
+}
+
+// actionLines says what each action of p will do, in order, and what the
+// uninstall hooks will run, one line each.
+func actionLines(p *engine.Plan) []string {
+	var out []string
+	for _, a := range p.Actions {
+		switch {
+		case a.Service != nil:
+			s := a.Service
+			line := fmt.Sprintf("service  %s (%s)", s.Name, s.Unit)
+			if s.Start {
+				line += ", started"
+			}
+			if s.Exists {
+				line += "; replaces a service of that name, which the uninstaller puts back"
+			}
+			out = append(out, line)
+		case a.Run != nil:
+			r := a.Run
+			undo := "no undo"
+			if !r.NoUndo {
+				undo = "undo: " + commandLine(r.Exec, r.Undo)
+			}
+			out = append(out, fmt.Sprintf("run      %s (%s)", commandLine(r.Exec, r.Args), undo))
+		case a.Migrate != nil:
+			m := a.Migrate
+			if m.Present {
+				out = append(out, fmt.Sprintf("move     %s to %s (the uninstaller leaves it there)", m.From, m.To))
+			}
+		}
+	}
+	for _, h := range p.Hooks {
+		out = append(out, "on uninstall, run "+commandLine(h.Exec, h.Args))
+	}
+	return out
+}
+
+func commandLine(exec string, args []string) string {
+	return strings.Join(append([]string{exec}, args...), " ")
 }
 
 // delegate runs the installed program's own uninstaller and returns its
@@ -273,6 +326,12 @@ func forceUninstall(ix *engine.Index, e Env, verbose bool) int {
 		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
 		return exitFail
 	}
+	unlock, err := engine.Lock(r.App.ID, r.Scope, e.Getenv)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
+		return exitFail
+	}
+	defer unlock()
 	_, _ = fmt.Fprintf(e.Out, "Removing %s %s with this installer's engine, not its own uninstaller.\n", r.App.Name, r.App.Version)
 	report := reporter(e, verbose)
 	left, err := engine.Uninstall(r, report)

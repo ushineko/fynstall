@@ -88,6 +88,7 @@ make lint
 make build        # bin/fynstall
 make hello        # examples/hello/bin/hello, the program the tests install
 make greet        # examples/greet for every target, the multi-target example
+make beacon       # examples/beacon, the example of services and other actions
 ```
 
 Go 1.26 or newer. Anything with a window needs cgo, OpenGL and X11/Wayland
@@ -103,6 +104,15 @@ MIT. See [LICENSE](LICENSE).
 ## Changelog
 
 ### Unreleased
+
+- Actions (spec 002 phase 4a): `service` runs a payload program as a
+  systemd user unit, and the uninstaller stops and removes it and puts back
+  a unit of that name that was there before. `run` runs a payload program
+  with an undo, or as an uninstall hook (`on: uninstall`) before anything is
+  removed. `migrate` moves an older version's data into a kept path. A
+  failed install undoes its actions. Only one installer or uninstaller of
+  an app runs at a time. `examples/beacon` shows them
+  ([#6](https://github.com/ushineko/fynstall/issues/6)).
 
 - Real runtimes (spec 002 phase 3): a symlink inside a payload directory is
   installed as a link, or as a copy for a Windows target, and one that

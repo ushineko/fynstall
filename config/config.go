@@ -54,16 +54,89 @@ type Parameter struct {
 }
 
 // Action is one install-time action (spec 002 D2a). Exactly one field is
-// set. Only config_file exists so far; the others are accepted by the
-// parser so that a config written for a later version says which phase it
-// needs rather than "unknown key".
+// set. Each is recorded with its undo, so the uninstaller reverses it.
 type Action struct {
-	ConfigFile *FileAction `yaml:"config_file"`
-	// The later types are held as plain values: a strict decode into a
-	// yaml.Node still reports the keys inside it as unknown.
-	Service any `yaml:"service"`
-	Run     any `yaml:"run"`
-	Migrate any `yaml:"migrate"`
+	ConfigFile *FileAction    `yaml:"config_file"`
+	Service    *ServiceAction `yaml:"service"`
+	Run        *RunAction     `yaml:"run"`
+	Migrate    *MigrateAction `yaml:"migrate"`
+}
+
+// ServiceAction runs a payload program as a service: a systemd unit on
+// Linux. The uninstaller stops and removes it, and puts back a service of
+// the same name that was there before.
+type ServiceAction struct {
+	// Name names the service: <name>.service on Linux.
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	// Exec is a payload destination, which may use build placeholders.
+	Exec string   `yaml:"exec"`
+	Args []string `yaml:"args"`
+	// Start starts the service after the install; the default is true.
+	Start *bool `yaml:"start"`
+	// Restart is no, on-failure (the default) or always.
+	Restart string `yaml:"restart"`
+}
+
+// Starts reports whether the service is started after the install.
+func (s *ServiceAction) Starts() bool { return s.Start == nil || *s.Start }
+
+// RestartPolicy is Restart with its default.
+func (s *ServiceAction) RestartPolicy() string {
+	if s.Restart == "" {
+		return "on-failure"
+	}
+	return s.Restart
+}
+
+// RunAction runs a payload program, never a shell: the last resort for a
+// change no built-in action makes.
+type RunAction struct {
+	// On is install (the default), when the program runs during the
+	// install and Undo at uninstall, or uninstall, when it runs before the
+	// uninstaller removes anything.
+	On string `yaml:"on"`
+	// Exec is a payload destination, which may use build placeholders.
+	Exec string   `yaml:"exec"`
+	Args []string `yaml:"args"`
+	// Undo are the arguments Exec is run with to undo the action, or the
+	// word none. Required for on: install.
+	Undo Undo `yaml:"undo"`
+	// ContinueOnError lets an uninstall go on when an uninstall hook fails.
+	ContinueOnError bool `yaml:"continue_on_error"`
+}
+
+// Hook reports whether the action runs at uninstall rather than install.
+func (r *RunAction) Hook() bool { return r.On == "uninstall" }
+
+// Undo is a run action's undo: arguments, or the word none.
+type Undo struct {
+	Set  bool
+	None bool
+	Args []string
+}
+
+// UnmarshalYAML reads a list of arguments or the scalar none.
+func (u *Undo) UnmarshalYAML(n *yaml.Node) error {
+	u.Set = true
+	if n.Kind == yaml.ScalarNode {
+		if n.Value != "none" {
+			return fmt.Errorf("line %d: undo is a list of arguments or the word none, not %q", n.Line, n.Value)
+		}
+		u.None = true
+		return nil
+	}
+	if err := n.Decode(&u.Args); err != nil {
+		return fmt.Errorf("undo: %w", err)
+	}
+	return nil
+}
+
+// MigrateAction moves data an older version kept at From to To, which is
+// kept on uninstall. A failed install moves it back; nothing else does.
+type MigrateAction struct {
+	From string `yaml:"from"`
+	To   string `yaml:"to"`
 }
 
 // FileAction writes a configuration file from parameters. The engine

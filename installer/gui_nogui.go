@@ -17,4 +17,4 @@ func installGUI(*manifest.Manifest, Payload, installFlags, Env) int { return exi
 func notice(string, string) {}
 
 // uninstallGUI is never reached, for the same reason.
-func uninstallGUI(*engine.Receipt, bool) int { return exitUsage }
+func uninstallGUI(*engine.Receipt, bool, func(string) string) int { return exitUsage }

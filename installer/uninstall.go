@@ -80,12 +80,22 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 		return problem(err.Error())
 	}
 	if md == modeGUI {
-		return uninstallGUI(r, yes)
+		return uninstallGUI(r, yes, e.Getenv)
 	}
 
+	unlock, err := engine.Lock(r.App.ID, r.Scope, e.Getenv)
+	if err != nil {
+		return problem(err.Error())
+	}
+	defer unlock()
 	report := reporter(e, verbose)
 	if quiet {
 		report = reporter(Env{Out: io.Discard, Err: e.Err}, false)
+	}
+	for _, h := range r.Hooks {
+		if !quiet {
+			_, _ = fmt.Fprintf(e.Out, "Before removing anything, it runs %s\n", commandLine(h.Exec, h.Args))
+		}
 	}
 	left, err := engine.Uninstall(r, report)
 	if err != nil {
