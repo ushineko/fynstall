@@ -122,7 +122,7 @@ func printLeftovers(e Env, left []engine.Leftover, all bool) {
 	if len(left) == 0 {
 		return
 	}
-	_, _ = fmt.Fprintf(e.Out, "Left %s files the program made, which the install did not create:\n", thousands(engine.LeftoverFiles(left)))
+	_, _ = fmt.Fprintf(e.Out, "Left %s the program made, which the install did not create:\n", leftoverCount(left))
 	for i, l := range left {
 		if i == shownLeftovers && !all {
 			_, _ = fmt.Fprintf(e.Out, "  and %s more (--verbose lists them all)\n", thousands(len(left)-i))
@@ -131,6 +131,22 @@ func printLeftovers(e Env, left []engine.Leftover, all bool) {
 		_, _ = fmt.Fprintf(e.Out, "  %s\n", l)
 	}
 	_, _ = fmt.Fprintln(e.Out, "Delete them if you no longer need them. --remove-leftovers removes them as part of the uninstall.")
+}
+
+// leftoverCount says how many leftovers there are: the files, or, when the
+// program made only directories, those.
+func leftoverCount(left []engine.Leftover) string {
+	if n := engine.LeftoverFiles(left); n > 0 {
+		return plural(n, "file", "files")
+	}
+	return plural(len(left), "empty folder", "empty folders")
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return thousands(n) + " " + many
 }
 
 // handOver is Uninstall for a copy that is not inside an install: it runs

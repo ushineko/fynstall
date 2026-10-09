@@ -255,8 +255,9 @@ in the install directory before the install. It never touches a path under
 
 **Leftovers.** Without a pattern, a file that the program made is not
 deleted, because the install did not create it. The uninstaller lists what
-is left in the directories the install created. `--remove-leftovers`
-deletes exactly those files. Nothing outside the install directory is ever
+is left in the directories the install created. The uninstall window then
+asks whether to remove them too, with "Keep them" and "Remove them too"; on
+the command line, `--remove-leftovers` deletes exactly those files. Nothing outside the install directory is ever
 a leftover.
 
 For a Python runtime, the bytecode cache can also be compiled when the

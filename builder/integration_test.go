@@ -719,7 +719,7 @@ func TestARuntimeWithLinksInstallsAndUninstallsWithItsLeftovers(t *testing.T) {
 	code, out := h.run(t, filepath.Join(h.root, "uninstall"))
 	require.Equal(t, 0, code, out)
 	state := filepath.Join(h.root, "python", "lib", "state.json")
-	require.Contains(t, out, "Left 1 files the program made")
+	require.Contains(t, out, "Left 1 file the program made")
 	require.Contains(t, out, state)
 	require.NotContains(t, out, "__pycache__", "uninstall.remove took the cache without listing it")
 	left, err := snapshot.Take(h.root)
