@@ -1,7 +1,7 @@
 # Spec 001: installer prototype
 
 **Issue**: [#1](https://github.com/ushineko/fynstall/issues/1)
-**Depends on**: [fynedesygn spec 056 / #172](https://github.com/ushineko/fynedesygn/issues/172) (the `wizard` package), phase 4 only
+**Depends on**: [fynedesygn spec 061 / #172](https://github.com/ushineko/fynedesygn/issues/172) (the `wizard` package), phase 4 only
 
 ## Status: INCOMPLETE
 
@@ -25,7 +25,7 @@ no toolchain needed.
 
 The installer has two front ends over one install engine:
 
-- **GUI**: a wizard built on the fynedesygn `wizard` package (spec 056).
+- **GUI**: a wizard built on the fynedesygn `wizard` package (spec 061).
 - **CLI**: prompts in a terminal, or no prompts with `--yes` and flags.
 
 It selects the front end from how it was started: from a desktop (double-click)
@@ -387,13 +387,15 @@ Upgrade, repair and downgrade stay in phase 6. `fynstall build` without
       taskbar, which proves the desktop file's base name matches the app ID. After uninstall it is gone from the launcher without
       a logout.
 
-### Phase 3: fynedesygn `wizard` (fynedesygn spec 056)
+### Phase 3: fynedesygn `wizard` (fynedesygn spec 061)
 
 This phase is done in the fynedesygn repository and can run in parallel with
 phases 1 and 2. Its acceptance criteria are in that spec.
 
-- [ ] fynedesygn spec 056 is COMPLETE and released, and fynstall `go.mod`
-      requires that version.
+- [x] fynedesygn spec 061 is COMPLETE and released, and fynstall `go.mod`
+      requires that version. Spec 061 was first numbered 056; upstream took
+      that number while the work was in flight. It landed in fynedesygn #182
+      and was released as v0.1.91, which `go.mod` now requires.
 
 ### Phase 4: GUI front end and mode selection (R11, R12)
 
@@ -584,6 +586,14 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 3 (2026-10-08)
+
+Done in fynedesygn: spec 061, PR #182, release v0.1.91. Its desk check is
+in that spec. Two crashes that only a real window shows were found there and
+fixed: widgets touched before the app existed, and a nil scroller measured
+by `SetContent`. Both bear on phase 4, where fynstall builds its pages from
+a manifest before `Run` creates the app.
 
 ### Phase 2 (2026-10-08)
 
