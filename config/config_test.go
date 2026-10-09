@@ -139,3 +139,67 @@ func TestADesktopEntryTakesTheAppIDByDefault(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "io.example.hello", c.Integration.Desktop[0].ID)
 }
+
+// multi writes a config with targets and per-target sources, and returns
+// its path. Only the linux/amd64 build exists unless more are named.
+func multi(t *testing.T, payload string, built ...string) string {
+	t.Helper()
+	p := write(t, "app:\n  id: io.example.hello\n  name: Hello\n  version: 0.1.0\npayload:\n"+payload+
+		"targets: [linux/amd64, linux/arm64, windows/amd64]\n")
+	for _, b := range append([]string{"linux-amd64/hello"}, built...) {
+		f := filepath.Join(filepath.Dir(p), "build", filepath.FromSlash(b))
+		require.NoError(t, os.MkdirAll(filepath.Dir(f), 0o750))
+		require.NoError(t, os.WriteFile(f, []byte("x"), 0o600))
+	}
+	return p
+}
+
+func TestPerTargetSourcesAreCheckedPerTarget(t *testing.T) {
+	entry := "  - src: build/{os}-{arch}/hello{exe}\n    dst: bin/hello{exe}\n"
+	_, err := Load(multi(t, entry, "linux-arm64/hello", "windows-amd64/hello.exe"))
+	require.NoError(t, err)
+
+	_, err = Load(multi(t, entry, "windows-amd64/hello.exe"))
+	var errs Errors
+	require.True(t, errors.As(err, &errs), "%v", err)
+	require.Len(t, errs, 1, "%v", errs)
+	require.Equal(t, 6, errs[0].Line)
+	require.Equal(t, "build/linux-arm64/hello does not exist (target linux/arm64)", errs[0].Msg)
+}
+
+func TestTargetPatterns(t *testing.T) {
+	cases := []struct {
+		name, entry, want string
+		line              int
+	}{
+		{"a filter limits the check to its targets",
+			"  - src: build/{os}-{arch}/hello\n    dst: bin/hello\n    targets: [linux/amd64]\n", "", 0},
+		{"a pattern must be os/arch",
+			"  - src: build/linux-amd64/hello\n    dst: bin/hello\n    targets: [linux]\n", `"linux" is not an os/arch pattern`, 8},
+		{"a filter that matches no target",
+			"  - src: build/linux-amd64/hello\n    dst: bin/hello\n    targets: [darwin/*]\n", "matches none of the targets", 8},
+		{"an unknown build placeholder",
+			"  - src: build/{platform}/hello\n    dst: bin/hello\n", "unknown placeholder {platform}", 6},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(multi(t, tc.entry))
+			if tc.want == "" {
+				require.NoError(t, err)
+				return
+			}
+			var errs Errors
+			require.True(t, errors.As(err, &errs), "%v", err)
+			require.Len(t, errs, 1, "%v", errs)
+			require.Equal(t, tc.line, errs[0].Line, "%v", errs[0])
+			require.Contains(t, errs[0].Msg, tc.want)
+		})
+	}
+}
+
+func TestMatches(t *testing.T) {
+	require.True(t, Matches(nil, "linux/amd64"))
+	require.True(t, Matches([]string{"windows/*"}, "windows/amd64"))
+	require.True(t, Matches([]string{"*/arm64"}, "linux/arm64"))
+	require.False(t, Matches([]string{"windows/*", "*/arm64"}, "linux/amd64"))
+}

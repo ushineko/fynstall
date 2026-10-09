@@ -69,6 +69,29 @@ A list of the files to install. Each entry has these keys:
 | `dst` | yes | Where it goes, relative to the install directory. |
 | `mode` | no | An octal mode such as `0755`, for every file in the entry. |
 | `exclude` | no | Patterns that leave out files in a directory entry. |
+| `targets` | no | The targets this entry is for, as `os/arch` patterns such as `linux/arm64` or `windows/*`. The default is every target. |
+
+**One payload list for every target.** `src` and `dst` can use three
+placeholders that the build resolves for each target: `{os}`, `{arch}`, and
+`{exe}`, which is `.exe` for Windows and empty for everything else.
+
+```yaml
+payload:
+  - src: build/{os}-{arch}/greet{exe}
+    dst: bin/greet{exe}
+  - src: notes/arm64.txt
+    dst: share/arm64.txt
+    targets: [linux/arm64]
+```
+
+`fynstall validate` checks that each `src` exists for every target it
+applies to, and names the target in the error. An entry whose `targets`
+match none of the config's targets is an error. The same placeholders work
+in `integration.path_links` and in a desktop entry's `exec`.
+
+**Quote a placeholder in a flow list.** Inside `[...]`, YAML reads `{` as
+the start of a mapping, so `[bin/greet{exe}]` does not parse. Write
+`["bin/greet{exe}"]`, or use a block list (`- bin/greet{exe}`).
 
 **Files.** A `dst` that ends in `/` is a directory, and the file keeps its
 own name in it.
@@ -135,6 +158,9 @@ types.
 A list of `os/arch` pairs. Without it, and without `--target`, the build is
 for the machine that runs it. The known targets are `linux/amd64`,
 `linux/arm64` and `windows/amd64`. Windows builds come with spec 001 phase 7.
+
+The build makes one installer per target, each with the payload for its
+target, and records the target in the installer's manifest.
 
 ## Placeholders
 

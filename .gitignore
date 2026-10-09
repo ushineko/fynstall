@@ -4,3 +4,5 @@
 coverage.out
 /examples/hello/bin/
 /examples/hello/dist/
+/examples/greet/build/
+/examples/greet/dist/

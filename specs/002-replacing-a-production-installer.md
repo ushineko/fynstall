@@ -336,7 +336,10 @@ Each phase is one PR with its own desk check, as in spec 001.
 
 1. **Per-target payloads (D1)**, before spec 001 phase 4. Config, manifest
    per target, build-time placeholders, validation. Desk check: one config
-   that builds a Linux and a Windows installer with different payloads.
+   that builds installers for two targets with different payloads. Windows
+   builds wait for spec 001 phase 7, so the two targets are Linux amd64 and
+   arm64, and the arm64 installer is run under `qemu-aarch64`. The Windows
+   half is phase 7's "same config, unchanged" criterion.
 2. **Parameters (D3a)**, with spec 001 phase 4: the schema, the sources, the
    wizard page and the CLI switches, and the `config_file` action. Desk
    check: an install that takes a value from each source and shows it in
@@ -365,6 +368,35 @@ Platform independence (every phase):
       block, and build installers for Linux and Windows from the same file.
 - [ ] Validation reports every `platform:` block and every OS-specific path
       outside `install.dir`.
+
+Phase 1, per-target payloads:
+
+- [x] `targets` on a payload entry, with `os/arch` patterns and `*`;
+      `{os}`, `{arch}` and `{exe}` in `src`, `dst`, links and desktop
+      `exec`. A malformed pattern, a filter that matches no target and an
+      unknown placeholder are errors with their line
+      (`TestTargetPatterns`).
+- [x] A placeholder `src` is checked for each target it applies to, and the
+      error names the target (`TestPerTargetSourcesAreCheckedPerTarget`).
+- [x] One config stages a different payload for `linux/amd64`,
+      `linux/arm64` and `windows/amd64`, with `.exe` names on Windows
+      (`TestOneConfigStagesADifferentPayloadPerTarget`).
+- [x] The builder makes one installer per target, each with its own
+      manifest and its `target` recorded. The amd64 installer installs and
+      uninstalls with the home unchanged, and its program prints
+      `greet from linux/amd64`; the arm64-only file is not in it
+      (`TestOneConfigInstallsEachTargetsOwnPayload`). The arm64 installer
+      installs and uninstalls under `qemu-aarch64`, with an AArch64 program
+      and the arm64-only file (`TestTheArm64InstallerInstallsUnderEmulation`).
+      A mutation that ignored `targets` failed both.
+- [x] An installer refuses a manifest staged for a target other than the
+      one it was built for. The builder never produces one, so this guards a
+      build fault; it cannot tell which machine it runs on, because under
+      emulation `GOARCH` is the binary's (`TestAnInstallerRefusesAPayloadForAnotherTarget`).
+- [x] Desk check: `make greet`, then `fynstall build --cli-only` in
+      `examples/greet`. Install the amd64 installer, run `greet`, and
+      uninstall it. Run the arm64 installer's `--dry-run` under
+      `qemu-aarch64` and see the arm64-only file in its plan.
 
 Experiment (phase 4):
 
@@ -419,3 +451,22 @@ Experiment (phase 4):
 ## Verification
 
 Filled in as each phase lands.
+
+### Phase 1 (2026-10-08)
+
+On CachyOS (amd64) with KDE Plasma 6. `make test` (with `-race`),
+`make lint` (0 issues) and `govulncheck` (no vulnerabilities) pass.
+
+- One `fynstall build --cli-only` in `examples/greet` made an amd64 and an
+  arm64 installer from one config.
+- The amd64 installer, run with `--yes` in the user's real home, installed
+  `greet` and linked it into `~/.local/bin`. `greet` printed
+  `greet from linux/amd64`, ahead of a `/usr/bin/greet` from another
+  package. After the uninstall, `type greet` named `/usr/bin/greet` again,
+  and the listings of `~/.local/share` and `~/.local/bin` matched those
+  taken before.
+- The arm64 installer's `--dry-run` under `qemu-aarch64` listed
+  `share/arm64.txt`, which the amd64 plan does not have.
+- Found on the way: `[bin/greet{exe}]` is not valid YAML, because `{` in a
+  flow list starts a mapping. The example uses a block list and
+  `docs/config.md` says how to quote it.

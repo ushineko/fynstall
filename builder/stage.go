@@ -22,11 +22,21 @@ type staged struct {
 	manifest.File
 }
 
-// stage lists every payload file in c with its hash and mode, and returns
-// the manifest and the generated files (the resized icons), keyed by their
-// path in the embedded payload. Files are sorted by destination, so the
-// same tree always gives the same manifest (R2, R3).
-func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []staged, map[string][]byte, error) {
+// stage lists every payload file of c for target with its hash and mode,
+// and returns the manifest and the generated files (the resized icons),
+// keyed by their path in the embedded payload. Entries whose targets do not
+// match are left out, and the build-time placeholders are resolved for
+// target (spec 002 D1a). Files are sorted by destination, so the same tree
+// always gives the same manifest (R2, R3).
+func stage(c *config.Config, runtimeVersion, target string) (*manifest.Manifest, []staged, map[string][]byte, error) {
+	vars := manifest.BuildVars(target)
+	expand := func(tmpl string) (string, error) {
+		s, err := manifest.Expand(tmpl, vars)
+		if err != nil {
+			return "", fmt.Errorf("target %s: %w", target, err)
+		}
+		return s, nil
+	}
 	var files []staged
 	seen := map[string]string{}
 	add := func(src, dst string, mode uint32) error {
@@ -46,7 +56,17 @@ func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []stage
 	}
 
 	for _, e := range c.Payload {
-		src := filepath.Join(c.Dir, filepath.FromSlash(e.Src))
+		if !e.Applies(target) {
+			continue
+		}
+		srcRel, err := expand(e.Src)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if e.Dst, err = expand(e.Dst); err != nil {
+			return nil, nil, nil, err
+		}
+		src := filepath.Join(c.Dir, filepath.FromSlash(srcRel))
 		mode := config.ParseMode(e.Mode)
 		fi, err := os.Lstat(src)
 		if err != nil {
@@ -77,7 +97,7 @@ func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []stage
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 
 	m := &manifest.Manifest{
-		Schema: manifest.Schema, RuntimeVersion: runtimeVersion,
+		Schema: manifest.Schema, RuntimeVersion: runtimeVersion, Target: target,
 		App:             manifest.App{ID: c.App.ID, Name: c.App.Name, Version: c.App.Version, Publisher: c.App.Publisher},
 		Scopes:          c.Install.Scopes,
 		Dirs:            c.Install.Dir,
@@ -86,7 +106,7 @@ func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []stage
 	for _, f := range files {
 		m.Files = append(m.Files, f.File)
 	}
-	if err := integrate(c, m, seen); err != nil {
+	if err := integrate(c, m, seen, expand); err != nil {
 		return nil, nil, nil, err
 	}
 	var generated map[string][]byte
@@ -102,18 +122,26 @@ func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []stage
 // integrate adds the links and desktop entries, each of which must name a
 // payload file. Directory entries only expand here, so this is the first
 // point at which that can be checked.
-func integrate(c *config.Config, m *manifest.Manifest, payload map[string]string) error {
+func integrate(c *config.Config, m *manifest.Manifest, payload map[string]string, expand func(string) (string, error)) error {
 	for _, l := range c.Integration.PathLinks {
+		l, err := expand(l)
+		if err != nil {
+			return err
+		}
 		target := path.Clean(l)
 		if _, ok := payload[target]; !ok {
-			return fmt.Errorf("integration.path_links: %s is not a payload file", l)
+			return fmt.Errorf("integration.path_links: %s is not a payload file for %s", l, m.Target)
 		}
 		m.Links = append(m.Links, manifest.Link{Name: path.Base(target), Target: target})
 	}
 	for _, d := range c.Integration.Desktop {
-		exec := path.Clean(d.Exec)
+		e, err := expand(d.Exec)
+		if err != nil {
+			return err
+		}
+		exec := path.Clean(e)
 		if _, ok := payload[exec]; !ok {
-			return fmt.Errorf("integration.desktop %s: exec %s is not a payload file", d.ID, d.Exec)
+			return fmt.Errorf("integration.desktop %s: exec %s is not a payload file for %s", d.ID, e, m.Target)
 		}
 		m.Desktop = append(m.Desktop, manifest.Desktop{
 			ID: d.ID, Name: d.Name, Comment: d.Comment, Exec: exec, Args: d.Args,

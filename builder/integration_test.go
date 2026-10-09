@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -38,11 +39,13 @@ const (
 )
 
 var (
-	src       string // the staged copy of examples/hello: config, README, bin/hello
-	v1Art     builder.Artifact
-	v1Again   builder.Artifact
-	v2Art     builder.Artifact
-	setupFail error
+	greetAMD64 builder.Artifact
+	greetARM64 builder.Artifact
+	src        string // the staged copy of examples/hello: config, README, bin/hello
+	v1Art      builder.Artifact
+	v1Again    builder.Artifact
+	v2Art      builder.Artifact
+	setupFail  error
 )
 
 func TestMain(m *testing.M) {
@@ -96,8 +99,50 @@ func setup(work string) error {
 	if v1Again, err = build(v1, "v1-again"); err != nil {
 		return err
 	}
-	v2Art, err = build(v2, "v2")
-	return err
+	if v2Art, err = build(v2, "v2"); err != nil {
+		return err
+	}
+	return setupGreet(repo, work)
+}
+
+// setupGreet builds examples/greet for linux/amd64 and linux/arm64, pure Go
+// with no cgo, and one installer per target from the same config.
+func setupGreet(repo, work string) error {
+	dir := filepath.Join(work, "greet")
+	for _, f := range []string{"fynstall.yaml", "notes/arm64.txt"} {
+		b, err := os.ReadFile(filepath.Join(repo, "examples", "greet", filepath.FromSlash(f)))
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(dir, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, b, 0o600); err != nil {
+			return err
+		}
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		cmd := exec.CommandContext(context.Background(), "go", "build", "-trimpath",
+			"-o", filepath.Join(dir, "build", "linux-"+arch, "greet"), "./examples/greet")
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("build greet for %s: %w\n%s", arch, err, out)
+		}
+	}
+	arts, err := builder.Build(context.Background(), builder.Options{
+		Config: filepath.Join(dir, "fynstall.yaml"), OutDir: filepath.Join(work, "greet-dist"),
+		CLIOnly: true, RuntimePath: repo, RuntimeVersion: v1, Env: []string{"GOPROXY=off"},
+	})
+	if err != nil {
+		return err
+	}
+	if len(arts) != 2 {
+		return fmt.Errorf("greet: %d artifacts, want 2", len(arts))
+	}
+	greetAMD64, greetARM64 = arts[0], arts[1]
+	return nil
 }
 
 // home is a temporary HOME, the install directory the default config gives
@@ -313,5 +358,59 @@ func TestTheMenuIsRefreshedAfterInstallAndUninstall(t *testing.T) {
 	b, err = os.ReadFile(log)
 	require.NoError(t, err)
 	require.Equal(t, "called\ncalled\n", string(b), "and once after the uninstall")
+	require.Equal(t, before, h.snap(t))
+}
+
+func greetHome(t *testing.T) home {
+	t.Helper()
+	h := newHome(t)
+	h.root = filepath.Join(h.dir, ".local", "share", "io.ushineko.greet")
+	return h
+}
+
+func TestOneConfigInstallsEachTargetsOwnPayload(t *testing.T) {
+	require.NoError(t, setupFail)
+	require.Equal(t, "linux/amd64", greetAMD64.Target)
+	require.Equal(t, "linux/arm64", greetARM64.Target)
+	if runtime.GOARCH != "amd64" {
+		t.Skip("the amd64 half runs natively on amd64 only")
+	}
+	h := greetHome(t)
+	before := h.snap(t)
+
+	code, out := h.run(t, greetAMD64.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	got, err := exec.CommandContext(t.Context(), filepath.Join(h.root, "bin", "greet")).Output()
+	require.NoError(t, err)
+	require.Equal(t, "greet from linux/amd64\n", string(got))
+	_, err = os.Stat(filepath.Join(h.root, "share", "arm64.txt"))
+	require.True(t, errors.Is(err, os.ErrNotExist), "the arm64-only file is not in the amd64 payload")
+
+	code, out = h.run(t, filepath.Join(h.root, "uninstall"), "--yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
+}
+
+func TestTheArm64InstallerInstallsUnderEmulation(t *testing.T) {
+	require.NoError(t, setupFail)
+	qemu, err := exec.LookPath("qemu-aarch64")
+	if err != nil {
+		t.Skip("qemu-aarch64 is not installed; the arm64 installer was built but not run")
+	}
+	h := greetHome(t)
+	before := h.snap(t)
+
+	code, out := h.run(t, qemu, greetARM64.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	b, err := os.ReadFile(filepath.Join(h.root, "share", "arm64.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "This file is installed on linux/arm64 only.\n", string(b))
+	f, err := elf.Open(filepath.Join(h.root, "bin", "greet"))
+	require.NoError(t, err)
+	require.Equal(t, elf.EM_AARCH64, f.Machine)
+	require.NoError(t, f.Close())
+
+	code, out = h.run(t, qemu, filepath.Join(h.root, "uninstall"), "--yes")
+	require.Equal(t, 0, code, out)
 	require.Equal(t, before, h.snap(t))
 }

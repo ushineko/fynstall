@@ -64,6 +64,7 @@ make test
 make lint
 make build        # bin/fynstall
 make hello        # examples/hello/bin/hello, the program the tests install
+make greet        # examples/greet for every target, the multi-target example
 ```
 
 Go 1.26 or newer. Anything with a window needs cgo, OpenGL and X11/Wayland
@@ -79,6 +80,12 @@ MIT. See [LICENSE](LICENSE).
 ## Changelog
 
 ### Unreleased
+
+- One config for every target: payload entries can name their `targets`,
+  and `{os}`, `{arch}` and `{exe}` resolve per target in payload paths,
+  links and desktop entries. Each installer carries the payload for its own
+  target. `examples/greet` builds for Linux amd64 and arm64 from one config
+  (spec 002 phase 1, [#6](https://github.com/ushineko/fynstall/issues/6)).
 
 - Design for what replacing a production installer requires (spec 002,
   [#6](https://github.com/ushineko/fynstall/issues/6)): one config for every

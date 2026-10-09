@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 
 	"github.com/ushineko/fynstall/engine"
 	"github.com/ushineko/fynstall/manifest"
@@ -49,6 +50,14 @@ func Install(args []string, p Payload, e Env) int {
 	if f.version {
 		_, _ = fmt.Fprintf(e.Out, "%s %s installer (fynstall %s)\n", m.App.Name, m.App.Version, m.RuntimeVersion)
 		return exitOK
+	}
+	if built := runtime.GOOS + "/" + runtime.GOARCH; m.Target != "" && m.Target != built {
+		// The builder compiles each installer for the target whose payload
+		// it embeds (spec 002 D1a), so these always agree unless the build
+		// went wrong. This cannot tell which machine it runs on: under
+		// emulation GOARCH is the binary's, not the host's.
+		_, _ = fmt.Fprintf(e.Err, "This installer's payload is for %s, but the installer was built for %s. Rebuild it.\n", m.Target, built)
+		return exitFail
 	}
 	if f.gui && !guiAvailable {
 		_, _ = fmt.Fprintln(e.Err, "This installer was built without the wizard (--cli-only). Run it without --gui.")

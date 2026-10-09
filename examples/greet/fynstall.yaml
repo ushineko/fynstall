@@ -1,0 +1,24 @@
+# The multi-target example. Run `make greet` first: it builds the program
+# for each target into build/<os>-<arch>/.
+app:
+  id: io.ushineko.greet
+  name: Greet
+  version: 0.1.0
+  publisher: ushineko
+
+payload:
+  # {os}, {arch} and {exe} resolve per target when the installer is built.
+  - src: build/{os}-{arch}/greet{exe}
+    dst: bin/greet{exe}
+  - src: notes/arm64.txt
+    dst: share/arm64.txt
+    targets: [linux/arm64]
+
+integration:
+  # A block list, not [bin/greet{exe}]: inside [...] YAML reads "{" as the
+  # start of a mapping. Quote it there: ["bin/greet{exe}"].
+  path_links:
+    - bin/greet{exe}
+
+# windows/amd64 joins in spec 001 phase 7.
+targets: [linux/amd64, linux/arm64]

@@ -96,6 +96,18 @@ build: ## Build the fynstall builder into bin/
 hello: ## Build examples/hello into examples/hello/bin/, where its fynstall.yaml looks
 	go build $(GOFLAGS) -o examples/hello/bin/hello ./examples/hello
 
+# The multi-target example, for every target its fynstall.yaml can name.
+# Pure Go, so one machine builds them all.
+GREET_TARGETS := linux/amd64 linux/arm64 windows/amd64
+
+.PHONY: greet
+greet: ## Build examples/greet for each target into examples/greet/build/
+	@for t in $(GREET_TARGETS); do \
+		os=$${t%/*}; arch=$${t#*/}; ext=; [ $$os = windows ] && ext=.exe; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build $(GOFLAGS) -o examples/greet/build/$$os-$$arch/greet$$ext ./examples/greet || exit 1; \
+		echo "  examples/greet/build/$$os-$$arch/greet$$ext"; \
+	done
+
 .PHONY: tidy
 tidy: ## go mod tidy
 	go mod tidy
