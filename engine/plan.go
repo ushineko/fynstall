@@ -40,6 +40,9 @@ const (
 	FromPayload Source = iota
 	// FromUninstaller writes the uninstaller binary.
 	FromUninstaller
+	// FromContent writes PlannedFile.Content, made when the plan was: a
+	// desktop entry, whose Exec names the install directory.
+	FromContent
 )
 
 // PlannedFile is one file Apply will write.
@@ -47,10 +50,22 @@ type PlannedFile struct {
 	manifest.File
 	// Dst is the absolute destination.
 	Dst string
+	// Base is the directory Dst must stay inside: the install directory,
+	// or {data} or {bin} for what goes outside it.
+	Base string
 	// Exists is true when something is already at Dst; Apply backs it up
 	// and the uninstaller puts it back.
+	Exists  bool
+	Source  Source
+	Content []byte
+}
+
+// PlannedLink is a symlink Apply will make.
+type PlannedLink struct {
+	Dst    string
+	Target string
+	Base   string
 	Exists bool
-	Source Source
 }
 
 // Plan is everything an install will change, computed without changing
@@ -67,6 +82,10 @@ type Plan struct {
 	// Dirs are the directories that do not exist yet, parents first.
 	Dirs  []string
 	Files []PlannedFile
+	Links []PlannedLink
+	// RefreshMenu is true when the install adds launcher entries or icons,
+	// so the front end asks the desktop to read them again.
+	RefreshMenu bool
 }
 
 // Options are the choices a front end passes to NewPlan.
@@ -126,21 +145,26 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	}
 
 	for _, f := range m.Files {
-		if err := p.addFile(f, FromPayload); err != nil {
+		if err := p.addFile(PlannedFile{File: f, Dst: p.inRoot(f.Path), Base: p.Root, Source: FromPayload}); err != nil {
 			return nil, err
 		}
 	}
-	sum := sha256.Sum256(o.Uninstaller)
-	if err := p.addFile(manifest.File{
-		Path: UninstallName, Size: int64(len(o.Uninstaller)),
-		SHA256: hex.EncodeToString(sum[:]), Mode: 0o755,
-	}, FromUninstaller); err != nil {
+	if err := p.addFile(PlannedFile{
+		File: contentFile(UninstallName, o.Uninstaller, 0o755), Dst: p.inRoot(UninstallName),
+		Base: p.Root, Source: FromUninstaller,
+	}); err != nil {
+		return nil, err
+	}
+	if err := p.addIntegration(vars); err != nil {
 		return nil, err
 	}
 
 	dirs := []string{p.Root, filepath.Join(p.Root, MetaDir), filepath.Join(p.Root, MetaDir, BackupDir), filepath.Dir(p.Index)}
 	for _, f := range p.Files {
 		dirs = append(dirs, filepath.Dir(f.Dst))
+	}
+	for _, l := range p.Links {
+		dirs = append(dirs, filepath.Dir(l.Dst))
 	}
 	if p.Dirs, err = missingDirs(dirs); err != nil {
 		return nil, err
@@ -163,22 +187,76 @@ func indexPath(vars map[string]string, id string) string {
 	return filepath.Join(platform.IndexDir(vars), id+".json")
 }
 
-func (p *Plan) addFile(f manifest.File, src Source) error {
-	dst := filepath.Join(p.Root, filepath.FromSlash(f.Path))
-	if err := Contained(p.Root, dst); err != nil {
+func (p *Plan) inRoot(rel string) string {
+	return filepath.Join(p.Root, filepath.FromSlash(rel))
+}
+
+// addIntegration plans the icons, desktop entries and links, which go
+// outside the install directory: under {data} and {bin}.
+func (p *Plan) addIntegration(vars map[string]string) error {
+	m := p.Manifest
+	data, bin := vars["data"], vars["bin"]
+	for _, ic := range m.Icons {
+		f := manifest.File{Path: ic.Path(), Size: ic.Bytes, SHA256: ic.SHA256, Mode: 0o644}
+		dst := filepath.Join(data, filepath.FromSlash(platform.IconPath(m.App.ID, ic.Size)))
+		if err := p.addFile(PlannedFile{File: f, Dst: dst, Base: data, Source: FromPayload}); err != nil {
+			return err
+		}
+	}
+	for _, d := range m.Desktop {
+		icon := ""
+		if d.Icon {
+			icon = m.App.ID
+		}
+		b := platform.RenderDesktop(d, p.inRoot(d.Exec), icon)
+		dst := filepath.Join(data, filepath.FromSlash(platform.DesktopPath(d.ID)))
+		if err := p.addFile(PlannedFile{File: contentFile(d.ID+".desktop", b, 0o644), Dst: dst, Base: data, Source: FromContent, Content: b}); err != nil {
+			return err
+		}
+	}
+	for _, l := range m.Links {
+		pl := PlannedLink{Dst: filepath.Join(bin, l.Name), Target: p.inRoot(l.Target), Base: bin}
+		exists, err := p.check(pl.Dst, pl.Base)
+		if err != nil {
+			return err
+		}
+		pl.Exists = exists
+		p.Links = append(p.Links, pl)
+	}
+	p.RefreshMenu = len(m.Icons) > 0 || len(m.Desktop) > 0
+	return nil
+}
+
+func contentFile(name string, b []byte, mode uint32) manifest.File {
+	sum := sha256.Sum256(b)
+	return manifest.File{Path: name, Size: int64(len(b)), SHA256: hex.EncodeToString(sum[:]), Mode: mode}
+}
+
+func (p *Plan) addFile(pf PlannedFile) error {
+	exists, err := p.check(pf.Dst, pf.Base)
+	if err != nil {
 		return err
 	}
-	pf := PlannedFile{File: f, Dst: dst, Source: src}
-	switch fi, err := os.Lstat(dst); {
-	case err == nil && fi.IsDir():
-		return fmt.Errorf("%s is a directory, and the payload has a file there", dst)
-	case err == nil:
-		pf.Exists = true
-	case !errors.Is(err, fs.ErrNotExist):
-		return fmt.Errorf("check %s: %w", dst, err)
-	}
+	pf.Exists = exists
 	p.Files = append(p.Files, pf)
 	return nil
+}
+
+// check holds dst inside base and reports whether something is there
+// already. A directory in the way is an error.
+func (p *Plan) check(dst, base string) (bool, error) {
+	if err := Contained(base, dst); err != nil {
+		return false, err
+	}
+	switch fi, err := os.Lstat(dst); {
+	case err == nil && fi.IsDir():
+		return false, fmt.Errorf("%s is a directory, and the install has a file there", dst)
+	case err == nil:
+		return true, nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return false, fmt.Errorf("check %s: %w", dst, err)
+	}
+	return false, nil
 }
 
 // Contained returns an error unless path, with every symlink in its
@@ -195,7 +273,7 @@ func Contained(root, path string) error {
 	}
 	rel, err := filepath.Rel(r, q)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return fmt.Errorf("%s resolves to %s, outside the install directory %s", path, q, r)
+		return fmt.Errorf("%s resolves to %s, outside the directory it belongs in, %s", path, q, r)
 	}
 	return nil
 }

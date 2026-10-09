@@ -23,9 +23,10 @@ type staged struct {
 }
 
 // stage lists every payload file in c with its hash and mode, and returns
-// the manifest. Files are sorted by destination, so the same tree always
-// gives the same manifest (R2, R3).
-func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []staged, error) {
+// the manifest and the generated files (the resized icons), keyed by their
+// path in the embedded payload. Files are sorted by destination, so the
+// same tree always gives the same manifest (R2, R3).
+func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []staged, map[string][]byte, error) {
 	var files []staged
 	seen := map[string]string{}
 	add := func(src, dst string, mode uint32) error {
@@ -49,7 +50,7 @@ func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []stage
 		mode := config.ParseMode(e.Mode)
 		fi, err := os.Lstat(src)
 		if err != nil {
-			return nil, nil, fmt.Errorf("payload: %w", err)
+			return nil, nil, nil, fmt.Errorf("payload: %w", err)
 		}
 		switch {
 		case fi.Mode().IsRegular():
@@ -58,20 +59,20 @@ func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []stage
 				dst += filepath.Base(src)
 			}
 			if err := add(src, path.Clean(dst), mode); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		case fi.IsDir():
 			if err := walk(src, e, func(file, rel string) error {
 				return add(file, path.Join(e.Dst, rel), mode)
 			}); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		default:
-			return nil, nil, fmt.Errorf("payload: %s is not a regular file or directory", src)
+			return nil, nil, nil, fmt.Errorf("payload: %s is not a regular file or directory", src)
 		}
 	}
 	if len(files) == 0 {
-		return nil, nil, fmt.Errorf("payload: no files")
+		return nil, nil, nil, fmt.Errorf("payload: no files")
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 
@@ -85,7 +86,41 @@ func stage(c *config.Config, runtimeVersion string) (*manifest.Manifest, []stage
 	for _, f := range files {
 		m.Files = append(m.Files, f.File)
 	}
-	return m, files, nil
+	if err := integrate(c, m, seen); err != nil {
+		return nil, nil, nil, err
+	}
+	var generated map[string][]byte
+	if c.App.Icon != "" {
+		var err error
+		if m.Icons, generated, err = icons(filepath.Join(c.Dir, filepath.FromSlash(c.App.Icon))); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return m, files, generated, nil
+}
+
+// integrate adds the links and desktop entries, each of which must name a
+// payload file. Directory entries only expand here, so this is the first
+// point at which that can be checked.
+func integrate(c *config.Config, m *manifest.Manifest, payload map[string]string) error {
+	for _, l := range c.Integration.PathLinks {
+		target := path.Clean(l)
+		if _, ok := payload[target]; !ok {
+			return fmt.Errorf("integration.path_links: %s is not a payload file", l)
+		}
+		m.Links = append(m.Links, manifest.Link{Name: path.Base(target), Target: target})
+	}
+	for _, d := range c.Integration.Desktop {
+		exec := path.Clean(d.Exec)
+		if _, ok := payload[exec]; !ok {
+			return fmt.Errorf("integration.desktop %s: exec %s is not a payload file", d.ID, d.Exec)
+		}
+		m.Desktop = append(m.Desktop, manifest.Desktop{
+			ID: d.ID, Name: d.Name, Comment: d.Comment, Exec: exec, Args: d.Args,
+			Categories: d.Categories, Terminal: d.Terminal, Icon: c.App.Icon != "",
+		})
+	}
+	return nil
 }
 
 // walk calls fn for each regular file under root that no exclude pattern

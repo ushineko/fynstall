@@ -102,7 +102,7 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 		return nil, err
 	}
 
-	m, files, err := stage(c, o.RuntimeVersion)
+	m, files, generated, err := stage(c, o.RuntimeVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 			Installer:   filepath.Join(o.OutDir, base+"-installer"),
 			Uninstaller: filepath.Join(o.OutDir, base+"-uninstaller"),
 		}
-		if err := buildTarget(ctx, o, mod, goos, goarch, manifestJSON, files, a); err != nil {
+		if err := buildTarget(ctx, o, mod, goos, goarch, manifestJSON, files, generated, a); err != nil {
 			return nil, fmt.Errorf("target %s: %w", t, err)
 		}
 		out = append(out, a)
@@ -131,7 +131,7 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 	return out, nil
 }
 
-func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, goarch string, manifestJSON []byte, files []staged, a Artifact) error {
+func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, goarch string, manifestJSON []byte, files []staged, generated map[string][]byte, a Artifact) error {
 	work, err := os.MkdirTemp("", "fynstall-build-*")
 	if err != nil {
 		return fmt.Errorf("create work directory: %w", err)
@@ -163,6 +163,15 @@ func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, go
 		dst := filepath.Join(in, "payload", filepath.FromSlash(f.Path))
 		if err := copyPayload(f.src, dst); err != nil {
 			return err
+		}
+	}
+	for p, b := range generated {
+		dst := filepath.Join(in, "payload", filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+			return fmt.Errorf("stage %s: %w", p, err)
+		}
+		if err := os.WriteFile(dst, b, 0o600); err != nil { // #nosec G703 -- p is a manifest.Icon path, fixed by the builder
+			return fmt.Errorf("stage %s: %w", p, err)
 		}
 	}
 	if err := goBuild(ctx, o, in, goos, goarch, a.Installer); err != nil {

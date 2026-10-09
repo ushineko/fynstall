@@ -41,6 +41,9 @@ type App struct {
 	Name      string `yaml:"name"`
 	Version   string `yaml:"version"`
 	Publisher string `yaml:"publisher"`
+	// Icon is a square PNG of at least MinIconSize pixels, relative to the
+	// config. The build resizes it to the hicolor sizes.
+	Icon string `yaml:"icon"`
 }
 
 // Install says where the program goes.
@@ -59,11 +62,33 @@ type Entry struct {
 	Exclude []string `yaml:"exclude"`
 }
 
-// Integration is how the program meets the desktop. Phase 1 has only the
-// paths an uninstaller leaves alone; links and launcher entries are phase 2.
+// Integration is how the program meets the desktop.
 type Integration struct {
-	KeepOnUninstall []string `yaml:"keep_on_uninstall"`
+	// PathLinks are payload destinations to link into {bin}, under their
+	// own base names.
+	PathLinks []string `yaml:"path_links"`
+	// Desktop entries go in {data}/applications.
+	Desktop         []Desktop `yaml:"desktop"`
+	KeepOnUninstall []string  `yaml:"keep_on_uninstall"`
 }
+
+// Desktop is one launcher entry.
+type Desktop struct {
+	// ID names the file, <id>.desktop. The default is app.id: Wayland
+	// compositors match a window's app_id to the entry of that name, so the
+	// program's main window needs an entry with the app ID.
+	ID         string   `yaml:"id"`
+	Name       string   `yaml:"name"`
+	Comment    string   `yaml:"comment"`
+	Exec       string   `yaml:"exec"`
+	Args       []string `yaml:"args"`
+	Categories []string `yaml:"categories"`
+	Terminal   bool     `yaml:"terminal"`
+}
+
+// MinIconSize is the smallest source icon accepted: the largest hicolor
+// size, so every installed size is a reduction.
+const MinIconSize = 512
 
 // Scopes and targets this version accepts.
 var (
@@ -156,6 +181,11 @@ func (c *Config) defaults() {
 	for scope, dir := range DefaultDirs {
 		if _, ok := c.Install.Dir[scope]; !ok {
 			c.Install.Dir[scope] = dir
+		}
+	}
+	for i := range c.Integration.Desktop {
+		if c.Integration.Desktop[i].ID == "" {
+			c.Integration.Desktop[i].ID = c.App.ID
 		}
 	}
 }

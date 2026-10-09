@@ -64,6 +64,9 @@ func Uninstall(args []string, e Env) int {
 		_, _ = fmt.Fprintf(e.Err, "%v\nRun the uninstaller again to retry; its record is %s.\n", err, engine.ReceiptPath(r.Root))
 		return exitFail
 	}
+	if r.RefreshMenu {
+		refreshMenu(report)
+	}
 	if !quiet {
 		_, _ = fmt.Fprintf(e.Out, "Removed %s %s.\n", r.App.Name, r.App.Version)
 		for _, k := range r.Keep {

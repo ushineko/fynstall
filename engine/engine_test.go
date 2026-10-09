@@ -149,7 +149,7 @@ func TestASymlinkInTheInstallDirectoryCannotCarryAWriteOutside(t *testing.T) {
 	require.NoError(t, os.MkdirAll(f.root(), 0o750))
 	require.NoError(t, os.Symlink(outside, filepath.Join(f.root(), "bin")))
 	_, err := NewPlan(f.m, Options{Env: f.env})
-	require.ErrorContains(t, err, "outside the install directory")
+	require.ErrorContains(t, err, "outside the directory it belongs in")
 }
 
 func TestUninstallNeverTouchesAKeptPath(t *testing.T) {
@@ -164,4 +164,78 @@ func TestUninstallNeverTouchesAKeptPath(t *testing.T) {
 	require.NoError(t, err, "inside a kept path")
 	_, err = os.Stat(filepath.Join(f.root(), "bin"))
 	require.True(t, errors.Is(err, os.ErrNotExist), "outside it")
+}
+
+// withIntegration adds an icon, a desktop entry and a link to the fixture.
+func (f *fixture) withIntegration() {
+	icon := "not really a PNG"
+	sum := sha256.Sum256([]byte(icon))
+	ic := manifest.Icon{Size: 48, Bytes: int64(len(icon)), SHA256: hex.EncodeToString(sum[:])}
+	f.payload[ic.Path()] = &fstest.MapFile{Data: []byte(icon)}
+	f.m.Icons = []manifest.Icon{ic}
+	f.m.Desktop = []manifest.Desktop{{ID: "io.example.hello", Name: "Hello", Exec: "bin/hello", Icon: true}}
+	f.m.Links = []manifest.Link{{Name: "hello", Target: "bin/hello"}}
+}
+
+func (f *fixture) bin() string { return filepath.Join(f.home, ".local", "bin", "hello") }
+
+func TestIntegrationGoesUnderDataAndBinAndComesOutAgain(t *testing.T) {
+	f := newFixture(t)
+	f.withIntegration()
+	before := f.snap(t)
+
+	r, err := f.install(t)
+	require.NoError(t, err)
+	require.True(t, r.RefreshMenu)
+	share := filepath.Join(f.home, ".local", "share")
+	_, err = os.Stat(filepath.Join(share, "icons", "hicolor", "48x48", "apps", "io.example.hello.png"))
+	require.NoError(t, err)
+	entry, err := os.ReadFile(filepath.Join(share, "applications", "io.example.hello.desktop"))
+	require.NoError(t, err)
+	require.Contains(t, string(entry), "Exec="+filepath.Join(f.root(), "bin", "hello")+"\n")
+	require.Contains(t, string(entry), "Icon=io.example.hello\n")
+	target, err := os.Readlink(f.bin())
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(f.root(), "bin", "hello"), target)
+
+	require.NoError(t, Uninstall(r, nil))
+	require.Equal(t, before, f.snap(t))
+}
+
+func TestALinkPutsBackTheFileOrLinkItReplaced(t *testing.T) {
+	for name, prepare := range map[string]func(t *testing.T, path string){
+		"a file": func(t *testing.T, path string) {
+			require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\necho mine\n"), 0o700))
+		},
+		"a link": func(t *testing.T, path string) {
+			require.NoError(t, os.Symlink("/somewhere/else/hello", path))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.withIntegration()
+			require.NoError(t, os.MkdirAll(filepath.Dir(f.bin()), 0o750))
+			prepare(t, f.bin())
+			before := f.snap(t)
+
+			r, err := f.install(t)
+			require.NoError(t, err)
+			target, err := os.Readlink(f.bin())
+			require.NoError(t, err)
+			require.Equal(t, filepath.Join(f.root(), "bin", "hello"), target)
+
+			require.NoError(t, Uninstall(r, nil))
+			require.Equal(t, before, f.snap(t), "the same kind of thing, with the same content or target")
+		})
+	}
+}
+
+func TestAnIconDirectoryLinkedOutsideDataIsRefused(t *testing.T) {
+	f := newFixture(t)
+	f.withIntegration()
+	share := filepath.Join(f.home, ".local", "share")
+	require.NoError(t, os.MkdirAll(share, 0o750))
+	require.NoError(t, os.Symlink(t.TempDir(), filepath.Join(share, "icons")))
+	_, err := NewPlan(f.m, Options{Env: f.env})
+	require.ErrorContains(t, err, "outside the directory it belongs in")
 }

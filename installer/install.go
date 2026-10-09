@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 
 	"github.com/ushineko/fynstall/engine"
 	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/platform"
 )
 
 // guiAvailable is false in this build: the GUI front end arrives in spec
@@ -116,12 +118,39 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if _, err := engine.Apply(ctx, plan, p.Files, p.Uninstaller, reporter(e, f.verbose)); err != nil {
+	report := reporter(e, f.verbose)
+	if _, err := engine.Apply(ctx, plan, p.Files, p.Uninstaller, report); err != nil {
 		_, _ = fmt.Fprintf(e.Err, "Install failed, and the changes were undone: %v\n", err)
 		return exitFail
 	}
+	if plan.RefreshMenu {
+		refreshMenu(report)
+	}
 	_, _ = fmt.Fprintf(e.Out, "Installed %s %s in %s.\nTo remove it, run %s/%s.\n", m.App.Name, m.App.Version, plan.Root, plan.Root, engine.UninstallName)
+	if len(plan.Links) > 0 {
+		if bin := filepath.Dir(plan.Links[0].Dst); !onPath(bin, e.Getenv("PATH")) {
+			_, _ = fmt.Fprintf(e.Out, "%s is not on your PATH, so the links in it are not found by name. Add it to PATH to run them that way.\n", bin)
+		}
+	}
 	return exitOK
+}
+
+// refreshMenu asks the desktop to read the launcher entries again. A
+// failure is a warning: the files are in place, and the menu catches up at
+// the next login.
+func refreshMenu(report engine.Reporter) {
+	if err := platform.RefreshMenu(); err != nil {
+		report(engine.Event{Kind: engine.Warn, Text: fmt.Sprintf("the launcher menu was not refreshed: %v", err)})
+	}
+}
+
+func onPath(dir, path string) bool {
+	for _, p := range filepath.SplitList(path) {
+		if p != "" && filepath.Clean(p) == filepath.Clean(dir) {
+			return true
+		}
+	}
+	return false
 }
 
 // printPlan states what the install will do; with all, every path.
@@ -132,6 +161,11 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 		size += f.Size
 		if f.Exists {
 			replaced = append(replaced, f.Dst)
+		}
+	}
+	for _, l := range p.Links {
+		if l.Exists {
+			replaced = append(replaced, l.Dst)
 		}
 	}
 	_, _ = fmt.Fprintf(e.Out, "%s %s will be installed in %s (%d files, %d bytes).\n",
@@ -151,6 +185,13 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 			verb = "replace "
 		}
 		_, _ = fmt.Fprintf(e.Out, "  %s %s (%o)\n", verb, f.Dst, f.Mode)
+	}
+	for _, l := range p.Links {
+		verb := "link    "
+		if l.Exists {
+			verb = "replace "
+		}
+		_, _ = fmt.Fprintf(e.Out, "  %s %s -> %s\n", verb, l.Dst, l.Target)
 	}
 	_, _ = fmt.Fprintf(e.Out, "  create   %s\n", p.Index)
 	_, _ = fmt.Fprintf(e.Out, "  create   %s\n", engine.ReceiptPath(p.Root))
@@ -193,9 +234,13 @@ func forceUninstall(ix *engine.Index, e Env, verbose bool) int {
 		return exitFail
 	}
 	_, _ = fmt.Fprintf(e.Out, "Removing %s %s with this installer's engine, not its own uninstaller.\n", r.App.Name, r.App.Version)
-	if err := engine.Uninstall(r, reporter(e, verbose)); err != nil {
+	report := reporter(e, verbose)
+	if err := engine.Uninstall(r, report); err != nil {
 		_, _ = fmt.Fprintf(e.Err, "%v\n", err)
 		return exitFail
+	}
+	if r.RefreshMenu {
+		refreshMenu(report)
 	}
 	return exitOK
 }
