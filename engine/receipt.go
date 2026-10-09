@@ -54,7 +54,11 @@ type Receipt struct {
 	// upgrade reads back (spec 002 D3a). Secrets are named, never stored.
 	Parameters map[string]string `json:"parameters,omitempty"`
 	Secrets    []string          `json:"secrets,omitempty"`
-	Journal    []Entry           `json:"journal"`
+	// Remove are the uninstall.remove patterns, relative to Root: files the
+	// program makes, which the uninstaller removes without asking (spec 002
+	// D5).
+	Remove  []string `json:"uninstall_remove,omitempty"`
+	Journal []Entry  `json:"journal"`
 }
 
 // Index is the install index entry: where to find an install of an app.

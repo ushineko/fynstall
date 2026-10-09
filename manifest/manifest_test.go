@@ -50,3 +50,38 @@ func TestParseRefusesAnotherSchema(t *testing.T) {
 func TestBasename(t *testing.T) {
 	require.Equal(t, "hello", App{ID: "io.ushineko.hello"}.Basename())
 }
+
+func TestAPatternMatchesAnyDepthWithDoubleStar(t *testing.T) {
+	for _, c := range []struct {
+		pat, rel string
+		want     bool
+	}{
+		{"python/**/__pycache__", "python/__pycache__", true},
+		{"python/**/__pycache__", "python/lib/x/__pycache__", true},
+		{"python/**/__pycache__", "python/lib/__pycache__/a.pyc", false},
+		{"python/**/__pycache__", "other/__pycache__", false},
+		{"**/*.log", "a.log", true},
+		{"**/*.log", "logs/b/a.log", true},
+		{"cache/*", "cache/x", true},
+		{"cache/*", "cache/x/y", false},
+		{"**", "anything/at/all", true},
+	} {
+		require.Equal(t, c.want, MatchPattern(c.pat, c.rel), "%s ~ %s", c.pat, c.rel)
+	}
+}
+
+func TestAPatternCannotReachOutsideTheInstallDirectory(t *testing.T) {
+	require.Empty(t, CheckPattern("python/**/__pycache__"))
+	for p, want := range map[string]string{
+		"../x":      "outside",
+		"a/../../b": "outside",
+		"/etc/x":    "absolute",
+		`C:\x`:      "absolute",
+		"a//b":      "empty",
+		"a/**b":     "whole segment",
+		"[":         "bad pattern",
+		"  ":        "empty",
+	} {
+		require.Contains(t, CheckPattern(p), want, p)
+	}
+}

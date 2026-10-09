@@ -85,6 +85,9 @@ type Plan struct {
 	// Dirs are the directories that do not exist yet, parents first.
 	Dirs  []string
 	Files []PlannedFile
+	// Symlinks are the payload's own links, inside Root (spec 002 D4a).
+	Symlinks []PlannedLink
+	// Links go in {bin}.
 	Links []PlannedLink
 	// RefreshMenu is true when the install adds launcher entries or icons,
 	// so the front end asks the desktop to read them again.
@@ -157,6 +160,11 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 			return nil, err
 		}
 	}
+	for _, l := range m.Symlinks {
+		if err := p.addSymlink(l); err != nil {
+			return nil, err
+		}
+	}
 	if err := p.addFile(PlannedFile{
 		File: contentFile(UninstallName, o.Uninstaller, 0o755), Dst: p.inRoot(UninstallName),
 		Base: p.Root, Source: FromUninstaller,
@@ -175,7 +183,7 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	for _, f := range p.Files {
 		dirs = append(dirs, filepath.Dir(f.Dst))
 	}
-	for _, l := range p.Links {
+	for _, l := range slices.Concat(p.Symlinks, p.Links) {
 		dirs = append(dirs, filepath.Dir(l.Dst))
 	}
 	if p.Dirs, err = missingDirs(dirs); err != nil {
@@ -256,6 +264,26 @@ func (p *Plan) addIntegration(vars map[string]string) error {
 		p.Links = append(p.Links, pl)
 	}
 	p.RefreshMenu = len(m.Icons) > 0 || len(m.Desktop) > 0
+	return nil
+}
+
+// addSymlink plans a payload link. The builder has checked where it
+// resolves; the plan checks again that its target, as written, names a path
+// inside the install directory.
+func (p *Plan) addSymlink(l manifest.Symlink) error {
+	pl := PlannedLink{Dst: p.inRoot(l.Path), Target: filepath.FromSlash(l.Target), Base: p.Root}
+	if filepath.IsAbs(pl.Target) {
+		return fmt.Errorf("%s links to %s, an absolute path", pl.Dst, l.Target)
+	}
+	if err := Contained(p.Root, filepath.Join(filepath.Dir(pl.Dst), pl.Target)); err != nil {
+		return fmt.Errorf("%s links to %s: %w", pl.Dst, l.Target, err)
+	}
+	exists, err := p.check(pl.Dst, pl.Base)
+	if err != nil {
+		return err
+	}
+	pl.Exists = exists
+	p.Symlinks = append(p.Symlinks, pl)
 	return nil
 }
 

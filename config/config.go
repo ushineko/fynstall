@@ -35,6 +35,7 @@ type Config struct {
 	Integration Integration `yaml:"integration"`
 	Parameters  []Parameter `yaml:"parameters"`
 	Actions     []Action    `yaml:"actions"`
+	Uninstall   Uninstall   `yaml:"uninstall"`
 	UI          UI          `yaml:"ui"`
 	Targets     []string    `yaml:"targets"`
 }
@@ -75,6 +76,15 @@ type FileAction struct {
 	Format string `yaml:"format"`
 	// Values are written as one flat map, keys sorted.
 	Values map[string]string `yaml:"values"`
+}
+
+// Uninstall is what the uninstaller does beyond replaying the install.
+type Uninstall struct {
+	// Remove are patterns, relative to the install directory, for files
+	// the program makes, such as a bytecode cache. The uninstaller removes
+	// them without asking (spec 002 D5). "**" matches any number of
+	// directories.
+	Remove []string `yaml:"remove"`
 }
 
 // App identifies the program.

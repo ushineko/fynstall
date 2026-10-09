@@ -104,6 +104,14 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- Real runtimes (spec 002 phase 3): a symlink inside a payload directory is
+  installed as a link, or as a copy for a Windows target, and one that
+  leaves its entry is refused. `uninstall.remove` names the files a program
+  makes, such as a bytecode cache, for the uninstaller to remove. Other files
+  the program left in the install directory are listed, not deleted, and
+  `--remove-leftovers` deletes them
+  ([#6](https://github.com/ushineko/fynstall/issues/6)).
+
 - Design: spec 002 takes MSI as its reference model, adds uninstall hooks
   (`run` with `on: uninstall`), keeps symlinks that stay inside a payload
   (D4), and lists rather than deletes the files a program creates (D5),

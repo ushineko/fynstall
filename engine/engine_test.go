@@ -86,7 +86,8 @@ func TestInstallThenUninstallLeavesTheHomeAsItWas(t *testing.T) {
 	rr, err := ReadReceipt(ReceiptPath(f.root()))
 	require.NoError(t, err)
 	require.Equal(t, r.Journal, rr.Journal)
-	require.NoError(t, Uninstall(rr, nil))
+	_, err = Uninstall(rr, nil)
+	require.NoError(t, err)
 	require.Equal(t, before, f.snap(t))
 }
 
@@ -103,7 +104,8 @@ func TestUninstallPutsBackAFileTheInstallReplaced(t *testing.T) {
 
 	r, err := ReadReceipt(ReceiptPath(f.root()))
 	require.NoError(t, err)
-	require.NoError(t, Uninstall(r, nil))
+	_, err = Uninstall(r, nil)
+	require.NoError(t, err)
 	require.Equal(t, before, f.snap(t), "the original file, with its mode, and the directories that held it")
 }
 
@@ -160,7 +162,8 @@ func TestUninstallNeverTouchesAKeptPath(t *testing.T) {
 	require.NoError(t, err)
 	r, err := ReadReceipt(ReceiptPath(f.root()))
 	require.NoError(t, err)
-	require.NoError(t, Uninstall(r, nil))
+	_, err = Uninstall(r, nil)
+	require.NoError(t, err)
 	_, err = os.Stat(filepath.Join(f.root(), "share", "doc", "README"))
 	require.NoError(t, err, "inside a kept path")
 	_, err = os.Stat(filepath.Join(f.root(), "bin"))
@@ -199,7 +202,8 @@ func TestIntegrationGoesUnderDataAndBinAndComesOutAgain(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(f.root(), "bin", "hello"), target)
 
-	require.NoError(t, Uninstall(r, nil))
+	_, err = Uninstall(r, nil)
+	require.NoError(t, err)
 	require.Equal(t, before, f.snap(t))
 }
 
@@ -225,7 +229,8 @@ func TestALinkPutsBackTheFileOrLinkItReplaced(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, filepath.Join(f.root(), "bin", "hello"), target)
 
-			require.NoError(t, Uninstall(r, nil))
+			_, err = Uninstall(r, nil)
+			require.NoError(t, err)
 			require.Equal(t, before, f.snap(t), "the same kind of thing, with the same content or target")
 		})
 	}
@@ -267,7 +272,8 @@ func TestAConfigFileIsRenderedFromParametersAndHoldsItsSecretPrivately(t *testin
 	require.NoError(t, err)
 	require.NotContains(t, string(rb), "s3cr3t")
 
-	require.NoError(t, Uninstall(r, nil))
+	_, err = Uninstall(r, nil)
+	require.NoError(t, err)
 	require.Equal(t, before, f.snap(t))
 }
 
@@ -286,7 +292,8 @@ func TestAConfigFileInAKeptPathSurvivesTheUninstall(t *testing.T) {
 	require.NoError(t, err)
 	r, err := Apply(context.Background(), p, f.payload, nil, nil)
 	require.NoError(t, err)
-	require.NoError(t, Uninstall(r, nil))
+	_, err = Uninstall(r, nil)
+	require.NoError(t, err)
 	b, err := os.ReadFile(filepath.Join(f.home, ".config", "hello", "config.json"))
 	require.NoError(t, err)
 	require.Equal(t, "{\n  \"a\": \"b\"\n}\n", string(b))
@@ -320,4 +327,151 @@ func TestProgressCountsEveryFileAndByteAndMovesInsideALargeFile(t *testing.T) {
 		}
 	}
 	require.GreaterOrEqual(t, inside, 3, "the bar moves while a large file is copied")
+}
+
+func (f *fixture) uninstall(t *testing.T) (*Receipt, []Leftover) {
+	t.Helper()
+	r, err := ReadReceipt(ReceiptPath(f.root()))
+	require.NoError(t, err)
+	left, err := Uninstall(r, nil)
+	require.NoError(t, err)
+	return r, left
+}
+
+func write(t *testing.T, path, content string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+}
+
+func TestAPayloadLinkIsInstalledAsALinkAndRemoved(t *testing.T) {
+	f := newFixture(t)
+	f.m.Symlinks = []manifest.Symlink{
+		{Path: "share/doc/README.txt", Target: "README"},
+		{Path: "share/docs", Target: "doc"},
+		{Path: "bin/readme", Target: "../share/docs/README.txt"},
+	}
+	before := f.snap(t)
+	_, err := f.install(t)
+	require.NoError(t, err)
+	target, err := os.Readlink(filepath.Join(f.root(), "bin", "readme"))
+	require.NoError(t, err)
+	require.Equal(t, "../share/docs/README.txt", target, "as written, not resolved")
+	b, err := os.ReadFile(filepath.Join(f.root(), "bin", "readme"))
+	require.NoError(t, err)
+	require.Equal(t, "hello\n", string(b), "a chain through a directory link reaches the file")
+
+	_, left := f.uninstall(t)
+	require.Empty(t, left)
+	require.Equal(t, before, f.snap(t))
+}
+
+func TestAPayloadLinkPutsBackWhatWasAtItsPath(t *testing.T) {
+	f := newFixture(t)
+	f.m.Symlinks = []manifest.Symlink{{Path: "share/a", Target: "doc"}, {Path: "share/b", Target: "doc/README"}}
+	write(t, filepath.Join(f.root(), "share", "a"), "a file was here")
+	require.NoError(t, os.Symlink("elsewhere", filepath.Join(f.root(), "share", "b")))
+	before := f.snap(t)
+	_, err := f.install(t)
+	require.NoError(t, err)
+	target, err := os.Readlink(filepath.Join(f.root(), "share", "a"))
+	require.NoError(t, err)
+	require.Equal(t, "doc", target)
+	f.uninstall(t)
+	require.Equal(t, before, f.snap(t), "the file and the old link are back")
+}
+
+func TestAPayloadLinkThatLeavesTheInstallDirectoryIsRefused(t *testing.T) {
+	for _, target := range []string{"../../../../etc/passwd", "/etc/passwd"} {
+		f := newFixture(t)
+		f.m.Symlinks = []manifest.Symlink{{Path: "share/x", Target: target}}
+		_, err := NewPlan(f.m, Options{Env: f.env})
+		require.ErrorContains(t, err, filepath.Join(f.root(), "share", "x")+" links to "+target, target)
+	}
+}
+
+// The program writes a bytecode cache, and links one entry of it outside
+// the install. The patterns remove the cache and the link, never what the
+// link points at.
+func TestUninstallRemoveDeletesWhatItsPatternsMatchAndNothingElse(t *testing.T) {
+	f := newFixture(t)
+	f.m.UninstallRemove = []string{"share/**/__pycache__", "bin/*.log"}
+	before := f.snap(t)
+	outside := filepath.Join(t.TempDir(), "precious")
+	write(t, outside, "not the install's")
+	_, err := f.install(t)
+	require.NoError(t, err)
+	write(t, filepath.Join(f.root(), "share", "__pycache__", "a.pyc"), "a")
+	write(t, filepath.Join(f.root(), "share", "doc", "__pycache__", "sub", "b.pyc"), "b")
+	write(t, filepath.Join(f.root(), "bin", "run.log"), "log")
+	require.NoError(t, os.Symlink(filepath.Dir(outside), filepath.Join(f.root(), "share", "doc", "__pycache__", "out")))
+
+	_, left := f.uninstall(t)
+	require.Empty(t, left)
+	require.Equal(t, before, f.snap(t))
+	b, err := os.ReadFile(outside)
+	require.NoError(t, err)
+	require.Equal(t, "not the install's", string(b), "a link is removed, not followed")
+}
+
+func TestLeftoversAreListedNotDeletedUntilAskedFor(t *testing.T) {
+	f := newFixture(t)
+	before := f.snap(t)
+	_, err := f.install(t)
+	require.NoError(t, err)
+	write(t, filepath.Join(f.root(), "bin", "cache.db"), "c")
+	write(t, filepath.Join(f.root(), "share", "new", "x"), "x")
+	require.NoError(t, os.Symlink("/", filepath.Join(f.root(), "share", "new", "root")))
+
+	r, left := f.uninstall(t)
+	share := filepath.Join(f.root(), "share")
+	require.Equal(t, []Leftover{
+		{Path: filepath.Join(f.root(), "bin", "cache.db")},
+		{Path: filepath.Join(share, "new"), Dir: true},
+		{Path: filepath.Join(share, "new", "root")},
+		{Path: filepath.Join(share, "new", "x")},
+	}, left)
+	require.Equal(t, 3, LeftoverFiles(left))
+	_, err = os.Stat(filepath.Join(share, "new", "x"))
+	require.NoError(t, err, "listed, not deleted")
+	_, err = os.Stat(filepath.Join(share, "doc"))
+	require.True(t, errors.Is(err, os.ErrNotExist), "an emptied directory is still removed")
+
+	require.NoError(t, RemoveLeftovers(r, left, nil))
+	require.Equal(t, before, f.snap(t))
+}
+
+// A directory the install found already there holds the person's own
+// files: nothing in it is a leftover, and RemoveLeftovers refuses it.
+func TestADirectoryThatWasThereBeforeHoldsNoLeftovers(t *testing.T) {
+	f := newFixture(t)
+	f.m.UninstallRemove = []string{"**"}
+	mine := filepath.Join(f.root(), "mine.txt")
+	write(t, mine, "mine")
+	_, err := f.install(t)
+	require.NoError(t, err)
+	write(t, filepath.Join(f.root(), "bin", "cache.db"), "c")
+
+	r, left := f.uninstall(t)
+	require.Empty(t, left, "bin/cache.db matched ** and was removed; mine.txt is not in a directory the install created")
+	_, err = os.Stat(mine)
+	require.NoError(t, err)
+	err = RemoveLeftovers(r, []Leftover{{Path: mine}}, nil)
+	require.ErrorContains(t, err, "is not a leftover of Hello")
+	_, err = os.Stat(mine)
+	require.NoError(t, err)
+}
+
+func TestAKeptPathIsNeitherALeftoverNorRemovedByAPattern(t *testing.T) {
+	f := newFixture(t)
+	f.m.KeepOnUninstall = []string{"{data}/{id}/share/state"}
+	f.m.UninstallRemove = []string{"share/**"}
+	_, err := f.install(t)
+	require.NoError(t, err)
+	state := filepath.Join(f.root(), "share", "state", "db")
+	write(t, state, "s")
+	_, left := f.uninstall(t)
+	require.Empty(t, left)
+	_, err = os.Stat(state)
+	require.NoError(t, err)
 }

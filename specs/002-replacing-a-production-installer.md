@@ -294,6 +294,16 @@ did.
 
 **Decided: D4a** (2026-10-09).
 
+Settled while building it (2026-10-09): a link is checked by where it
+resolves, not by its text, since a target that stays inside as written can
+still leave through another link on its way. A link that points at
+nothing, or at something `exclude` leaves out, is refused, because it would
+dangle once installed. A link to a directory that holds another directory
+link is refused on every target, so the Windows copy is always finite and
+one config builds the same everywhere. A file that another entry installs
+under a link is refused, because the link would carry the write elsewhere.
+An entry whose `src` is itself a link stays refused.
+
 ### D5: files the program creates
 
 Python writes its bytecode cache (`__pycache__/*.pyc`) into its own
@@ -321,6 +331,26 @@ footgun this spec avoids.
    Each pattern is relative to the install directory and cannot reach
    outside it; validation refuses `..` and absolute patterns.
 3. **No recursive delete of a directory the install did not create, ever.**
+
+Settled while building it (2026-10-09):
+
+- **Leftovers are only inside the install directory.** "A directory the
+  install created" can be `{bin}` or `{data}/applications` when they did not
+  exist yet, and other programs put files there later. Only the directories
+  the install created under the install directory are searched. A
+  directory the install found already there holds the person's own files,
+  so nothing in it is a leftover, and `uninstall.remove` does not reach
+  into it either.
+- **How rule 3 applies to `uninstall.remove`.** A pattern that matches a
+  directory, such as `__pycache__`, removes what is in it one entry at a
+  time, deepest first, and then the directory once it is empty. Links are
+  removed, never followed; kept paths are skipped. All of it goes through
+  an `os.Root` opened on the install directory, so a link put in place of
+  a directory while the uninstaller runs cannot carry a removal outside it.
+- **The window waits for fynedesygn.** The uninstall window's result is one
+  line, set before the job runs, and it has no second action. Listing the
+  leftovers and "Remove them too" need a fynedesygn change; the command
+  line has both now.
 
 For Python there is also a fix at build time: compiling the bytecode when
 the payload is built, with hash-based `.pyc` files (Go embedding does not
@@ -553,17 +583,30 @@ Phase 2, parameters (CLI part; the wizard page lands with spec 001 phase 4):
 
 Phase 3, real runtimes:
 
-- [ ] D4 A payload symlink whose target is inside its entry is installed as
+- [x] D4 A payload symlink whose target is inside its entry is installed as
       a link and removed by the uninstall; a link that was at its path
       before is restored. An absolute target, or one that leaves the entry,
       is refused with the link's path. A Windows target gets a copy of the
-      target instead.
-- [ ] D5 After an uninstall, files the program created inside a directory
-      the install created are listed, not deleted. `--remove-leftovers`,
-      or "Remove them too", deletes exactly those, and never a kept path.
-- [ ] D5 `uninstall.remove` patterns are removed without asking; a pattern
+      target instead. (`builder/stage_test.go`: `TestALinkInsideItsEntryIsKeptAsALink`,
+      `TestALinkThatLeavesItsEntryIsRefused`,
+      `TestAWindowsTargetGetsACopyOfWhatALinkPointsAt`; `engine/engine_test.go`:
+      `TestAPayloadLinkIsInstalledAsALinkAndRemoved`,
+      `TestAPayloadLinkPutsBackWhatWasAtItsPath`.)
+- [x] D5 After an uninstall, files the program created inside a directory
+      the install created under the install directory are listed, not
+      deleted. `--remove-leftovers` deletes exactly those, and never a kept
+      path. (`TestLeftoversAreListedNotDeletedUntilAskedFor`,
+      `TestADirectoryThatWasThereBeforeHoldsNoLeftovers`,
+      `TestARuntimeWithLinksInstallsAndUninstallsWithItsLeftovers`.)
+- [ ] D5 The uninstall window lists the leftovers and offers "Remove them
+      too", which deletes exactly those. Needs a fynedesygn change to the
+      confirm window's result.
+- [x] D5 `uninstall.remove` patterns are removed without asking; a pattern
       with `..` or an absolute path is a config error.
-- [ ] Desk check: the bundled CPython runtime, unchanged, builds, installs,
+      (`TestUninstallRemoveDeletesWhatItsPatternsMatchAndNothingElse`,
+      `TestAKeptPathIsNeitherALeftoverNorRemovedByAPattern`, config
+      `TestEveryErrorHasItsLineAndField`.)
+- [x] Desk check: the bundled CPython runtime, unchanged, builds, installs,
       runs (`ssl`, `sqlite3`, `ctypes`) and uninstalls. With
       `uninstall.remove: ["python/**/__pycache__"]` the home is as it was
       before.
@@ -621,6 +664,32 @@ Experiment (phase 5):
 ## Verification
 
 Filled in as each phase lands.
+
+### Phase 3, CLI part (2026-10-09)
+
+On CachyOS (amd64). `make test` (with `-race`) and `make lint` (0 issues)
+pass.
+
+- The same bundled CPython 3.14 runtime for linux/amd64 as below, copied
+  with its links (`cp -a`) and otherwise unchanged: 10,487 files and 54
+  symlinks, none absolute. The config has one payload entry and
+  `uninstall.remove: ["python/**/__pycache__"]`.
+- `fynstall build --cli-only` took 2.6 s and made a 275 MB installer. In a
+  temporary `HOME`, the install copied 10,488 files (290 MB) in 1.4 s and
+  made the 54 links as links (`lib/libffi.so -> libffi.so.8.4.0`).
+- The installed interpreter imported `ssl` (OpenSSL 3.6.5), `sqlite3`
+  (3.53.4) and `ctypes`, and wrote 37 `.pyc` files in 9 `__pycache__`
+  directories.
+- The uninstall took 0.08 s. A listing of the home with every file's mode
+  and sha256, taken before the install, matched the one taken after it.
+- In a second run, the interpreter also wrote `python/state.db`. The
+  uninstall removed the cache and listed `state.db` as the one file left.
+  In a fresh home, the same run with `--remove-leftovers` left a listing
+  that matched the one before the install.
+- Found on the way: an install into a directory that the last uninstall
+  left (because it held `state.db`) does not create that directory, so
+  `state.db` is the person's file to that install, not a leftover. This is
+  the rule above working as intended.
 
 ### A real runtime (2026-10-09)
 

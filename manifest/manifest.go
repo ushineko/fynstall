@@ -38,6 +38,12 @@ type Manifest struct {
 	KeepOnUninstall []string `json:"keep_on_uninstall,omitempty"`
 	// Files are sorted by Path, so the same input gives the same bytes.
 	Files []File `json:"files"`
+	// Symlinks are the payload's own links, sorted by Path (spec 002 D4a).
+	Symlinks []Symlink `json:"symlinks,omitempty"`
+	// UninstallRemove are patterns, relative to the install directory, for
+	// files the program makes, which the uninstaller removes without asking
+	// (spec 002 D5).
+	UninstallRemove []string `json:"uninstall_remove,omitempty"`
 	// Icons are the app icon at each hicolor size, sorted by size.
 	Icons []Icon `json:"icons,omitempty"`
 	// Links go in {bin}, each pointing at a payload file.
@@ -128,6 +134,15 @@ type File struct {
 	Size   int64  `json:"size"`
 	SHA256 string `json:"sha256"`
 	Mode   uint32 `json:"mode"`
+}
+
+// Symlink is a symlink in the payload. Path is slash-separated and
+// relative to the install directory; Target is the link's target as it was
+// written, relative to the link's directory, and stays inside the payload
+// entry the link came from.
+type Symlink struct {
+	Path   string `json:"path"`
+	Target string `json:"target"`
 }
 
 // Marshal returns the manifest as indented JSON with a trailing newline.

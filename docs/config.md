@@ -25,6 +25,7 @@ the Windows Uninstall registry entry, have no keys of their own.
 - [integration](#integration)
 - [parameters](#parameters)
 - [actions](#actions)
+- [uninstall](#uninstall)
 - [ui](#ui)
 - [targets](#targets)
 - [Placeholders](#placeholders)
@@ -114,8 +115,25 @@ that stays inside the install directory. It cannot be inside `.fynstall`,
 which fynstall uses for its own records. It cannot be named `go.mod`, or
 contain a character that Go embedding refuses: a double quote, a single
 quote, a backtick, `*`, `<`, `>`, `?`, `|`, `\` or `:`.
-Symlinks in the payload are refused, not followed. Two entries cannot
-install to the same `dst`.
+Two entries cannot install to the same `dst`.
+
+**Symlinks.** A symlink inside a directory entry is installed as a link,
+with its target as it was written. A bundled runtime has many, such as
+`libffi.so -> libffi.so.8.4.0`. The build refuses a link when:
+
+- its target is an absolute path;
+- it resolves outside the directory entry it is in, including through
+  another link on the way;
+- it points at nothing, or at something `exclude` leaves out;
+- it points at a directory that holds another directory link, which a
+  copy could never finish;
+- another entry installs a file under it.
+
+An entry whose `src` is itself a link is refused: name the file it points
+at. Making a link on Windows needs a privilege that most users do not have,
+so a Windows installer gets a copy of what each link points at. A link to a
+directory becomes a copy of that directory. Go embedding stores identical
+files once, so the copies do not make the installer larger.
 
 ## integration
 
@@ -213,6 +231,40 @@ installer does not run the program to produce one.
   `keep_on_uninstall`. Keep it when the configuration must outlive an
   uninstall, or an upgrade, which runs the old uninstaller first.
 
+## uninstall
+
+What the uninstaller does beyond undoing the install.
+
+```yaml
+uninstall:
+  remove: ["python/**/__pycache__"]
+```
+
+| Key | Meaning |
+|---|---|
+| `remove` | Patterns, relative to the install directory, for files the program makes, such as a bytecode cache. The uninstaller removes them without asking. |
+
+A pattern uses the syntax of Go's `path.Match` for each part between
+slashes, and `**` matches any number of directories. A pattern cannot be
+absolute or contain `..`. A pattern that matches a directory removes what is
+in it, one file at a time, and then the directory. The uninstaller does not
+follow links while it removes; it removes the link. It looks only in the
+directories the install created, so a pattern never reaches files that were
+in the install directory before the install. It never touches a path under
+`keep_on_uninstall`.
+
+**Leftovers.** Without a pattern, a file that the program made is not
+deleted, because the install did not create it. The uninstaller lists what
+is left in the directories the install created. `--remove-leftovers`
+deletes exactly those files. Nothing outside the install directory is ever
+a leftover.
+
+For a Python runtime, the bytecode cache can also be compiled when the
+payload is built, with hash-based `.pyc` files
+(`python -m compileall --invalidation-mode checked-hash`). Go embedding
+does not keep file times, so a time-based `.pyc` would be written again. The
+cache is then part of the install and of its uninstall.
+
 ## ui
 
 What the wizard shows.
@@ -269,5 +321,7 @@ link is saved as its target, so the uninstaller puts back a link and not a
 copy of the file it pointed at.
 
 The uninstaller undoes the receipt's changes in reverse order. It removes
-what the install created and puts back what it replaced. Then it removes the
-receipt and the directories the install created, if they are empty.
+what the install created and puts back what it replaced. Then it removes
+what `uninstall.remove` matches, the receipt, and the directories the
+install created, if they are empty. It lists what the program left in the
+install directory; see [uninstall](#uninstall).
