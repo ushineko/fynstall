@@ -58,6 +58,13 @@ is enforced by a test, the test is named.
   its root (`..`, an absolute `dst`, a symlink escape) is refused by
   `validate` and again by `Apply`. Payload content is never run during an
   install.
+- **One config for every platform.** Every key in `fynstall.yaml` means
+  the same thing on every OS; the OS backends in `platform` do the
+  platform-specific work. What a backend can derive (Uninstall registry
+  fields, version resources, Start Menu shortcuts) gets no config key.
+  A `platform:` block is a last resort that validation reports. A new key
+  that only makes sense on one OS is a design problem to raise, not a key
+  to add (spec 002).
 - **The CLI-only build carries no Fyne.** `-tags nogui` with
   `CGO_ENABLED=0` must build and link no graphics libraries.
 

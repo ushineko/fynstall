@@ -10,6 +10,13 @@ optional key does not become a setting that is silently ignored.
 
 `fynstall init` writes a commented example to start from.
 
+**One config serves every platform.** Every key means the same thing on
+Linux and on Windows. The config says what the program needs, such as a
+launcher entry or a link on `PATH`, and the installer does it the way each
+platform does. Paths are placeholders such as `{data}`, never platform paths.
+Platform details that the installer can work out from the config, such as
+the Windows Uninstall registry entry, have no keys of their own.
+
 ## Contents
 
 - [app](#app)

@@ -80,6 +80,12 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- Design for what replacing a production installer requires (spec 002,
+  [#6](https://github.com/ushineko/fynstall/issues/6)): one config for every
+  platform, payloads per target, install-time actions with an undo, and
+  declared parameters with configuration kept outside the install directory.
+  Spec 001's later phases are updated to match.
+
 - Desktop integration on Linux: the build resizes `app.icon` to the seven
   hicolor sizes, and the installer adds launcher entries, icons and links in
   `~/.local/bin`, then refreshes the KDE menu. The uninstaller puts back a

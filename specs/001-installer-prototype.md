@@ -2,6 +2,7 @@
 
 **Issue**: [#1](https://github.com/ushineko/fynstall/issues/1)
 **Depends on**: [fynedesygn spec 061 / #172](https://github.com/ushineko/fynedesygn/issues/172) (the `wizard` package), phase 4 only
+**Related**: [spec 002](002-replacing-a-production-installer.md) adds per-target payloads, parameters and install-time actions, and reshapes phases 4–7 here
 
 ## Status: INCOMPLETE
 
@@ -399,6 +400,9 @@ phases 1 and 2. Its acceptance criteria are in that spec.
 
 ### Phase 4: GUI front end and mode selection (R11, R12)
 
+Lands after spec 002 phase 1 (per-target payloads), with spec 002 phase 2
+(parameters).
+
 - [ ] `ui/gui` builds the page sequence from the manifest: Welcome, Licence
       (if set), Scope (if more than one), Directory, Components (if any),
       Summary (plan from R6), Progress (engine events), Finish (launch check
@@ -416,8 +420,14 @@ phases 1 and 2. Its acceptance criteria are in that spec.
       opens. Run it from Konsole and the CLI runs. `--gui` from Konsole
       opens the wizard. Cancel during the progress page leaves no files.
       Launch now on the finish page starts Hello.
+- [ ] When the config declares parameters (spec 002 D3a), the wizard has a
+      page for them, generated with fynedesygn `forms`, and a secret is a
+      password entry.
 
 ### Phase 5: system scope on Linux (R13, R14)
+
+Lands with spec 002 phase 3 (actions): the first phase whose installs change
+more than files.
 
 - [ ] Helper protocol test: the parent starts the helper without elevation
       (test hook), receives JSON events, and handles a helper crash as a
@@ -429,13 +439,18 @@ phases 1 and 2. Its acceptance criteria are in that spec.
       `/usr/local/bin`. `ps` during install shows the Fyne process running as
       the user. CLI system install uses `sudo`. Uninstall in each case asks
       for elevation once and removes everything.
+- [ ] The privileged helper applies actions as well as files (spec 002
+      D2a): a `service` action as a systemd system unit, the install lock
+      (L3) and permissions (L4).
 
 ### Phase 6: upgrade, repair, and a real consumer (R17)
 
 - [ ] Integration tests: install 0.1.0, then install 0.2.0, which drops one
-      file. The 0.1.0 uninstaller runs (R9e), the dropped file is removed,
-      and the receipt is the 0.2.0 one. Repair
-      restores a deleted file. Downgrade asks for confirmation.
+      file. The new installer gathers the parameters (spec 002 D3a), stops
+      the services, and runs the 0.1.0 uninstaller with `--upgrade` (R9e).
+      The dropped file is removed, kept paths and parameter values survive,
+      and the receipt is the 0.2.0 one. Repair restores a deleted file.
+      Downgrade asks for confirmation.
 - [ ] First consumer: a `fynstall.yaml` for clockwork-orange that produces the
       same files as its `install.sh` (two binaries, `.desktop`, seven icon
       sizes, the `--no-gui` equivalent as a component). The two results are
@@ -457,12 +472,18 @@ phases 1 and 2. Its acceptance criteria are in that spec.
       directory is gone after a reboot (R9f). A system install shows one UAC
       prompt.
 - [ ] `--cli-only` Windows installer works over SSH or in a plain console.
+- [ ] The same `examples/hello` config, unchanged, builds the Windows
+      installer: per-target payloads (spec 002 D1a) and platform
+      equivalents of existing keys (L10), with no `platform:` block.
+- [ ] Windows backends for the actions (spec 002 D2a: `service` through the
+      SCM, with recovery actions) and spec 002 L1, L2, L6, L7 and L8.
 
 ### Later (not this spec)
 
-macOS `.app` bundle into `~/Applications` or `/Applications`. Code signing
-(Authenticode, notarisation). Payload compression. Post-install hooks. Auto-update.
-A file association and URL-scheme registration.
+macOS `.app` bundle into `~/Applications` or `/Applications`, and
+notarisation. Payload compression. Auto-update. A file association and
+URL-scheme registration. (Authenticode signing and install-time actions,
+listed here at first, moved to spec 002.)
 
 ## Test Strategy
 
@@ -507,8 +528,10 @@ A file association and URL-scheme registration.
   revisit it.
 - **Security.** The installer writes only inside the planned paths. It
   rejects any destination that resolves outside its root (`..`, absolute
-  `dst`, symlink escape) both at `validate` time and in `Apply`. It runs no
-  payload content during install. Hashes are checked on extract.
+  `dst`, symlink escape) both at `validate` time and in `Apply`. It runs
+  payload content only through a declared `run` action (spec 002 D2a),
+  which is shown on the summary page and in `--dry-run` and has an undo.
+  Hashes are checked on extract.
 - **A crash during Apply leaves no receipt.** The journal is held in
   memory and written into the receipt at the end. If the process is killed
   mid-install, nothing records what it wrote, and no uninstaller exists yet.
