@@ -26,12 +26,13 @@ removes it (R9e). Started from the desktop, it shows its problems in a
 window, never only on stderr, which nobody sees there.
 */
 func Uninstall(args []string, app manifest.App, e Env) int {
-	var yes, quiet, keepData, verbose, gui, cli bool
+	var yes, quiet, keepData, verbose, gui, cli, removeLeftovers bool
 	fl := newFlags("uninstall", e)
 	fl.BoolVar(&yes, "yes", false, "in the window, skip the question (the command line never asks)")
 	fl.BoolVar(&quiet, "quiet", false, "do not ask, and print only problems")
 	fl.BoolVar(&keepData, "keep-data", true, "leave the paths the program keeps on uninstall (always true)")
 	fl.BoolVar(&verbose, "verbose", false, "list every file as it is removed")
+	fl.BoolVar(&removeLeftovers, "remove-leftovers", false, "also remove the files the program made in the directories the install created")
 	fl.BoolVar(&gui, "gui", false, "use the wizard")
 	fl.BoolVar(&cli, "cli", false, "use the command line")
 	if err := fl.Parse(args); err != nil {
@@ -86,20 +87,50 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 	if quiet {
 		report = reporter(Env{Out: io.Discard, Err: e.Err}, false)
 	}
-	if err := engine.Uninstall(r, report); err != nil {
+	left, err := engine.Uninstall(r, report)
+	if err != nil {
 		_, _ = fmt.Fprintf(e.Err, "%v\nRun the uninstaller again to retry; its record is %s.\n", err, engine.ReceiptPath(r.Root))
 		return exitFail
+	}
+	code := exitOK
+	if removeLeftovers && len(left) > 0 {
+		if err := engine.RemoveLeftovers(r, left, report); err != nil {
+			_, _ = fmt.Fprintf(e.Err, "uninstall: %v\n", err)
+			code = exitFail
+		}
+		left = nil
 	}
 	if r.RefreshMenu {
 		refreshMenu(report)
 	}
 	if !quiet {
 		_, _ = fmt.Fprintf(e.Out, "Removed %s %s.\n", r.App.Name, r.App.Version)
+		printLeftovers(e, left, verbose)
 		for _, k := range r.Keep {
 			_, _ = fmt.Fprintf(e.Out, "Your data, if any, was left in %s.\n", k)
 		}
 	}
-	return exitOK
+	return code
+}
+
+// shownLeftovers is how many leftovers are listed without --verbose.
+const shownLeftovers = 20
+
+// printLeftovers lists what the uninstall left because the install did
+// not create it (spec 002 D5).
+func printLeftovers(e Env, left []engine.Leftover, all bool) {
+	if len(left) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(e.Out, "Left %s files the program made, which the install did not create:\n", thousands(engine.LeftoverFiles(left)))
+	for i, l := range left {
+		if i == shownLeftovers && !all {
+			_, _ = fmt.Fprintf(e.Out, "  and %s more (--verbose lists them all)\n", thousands(len(left)-i))
+			break
+		}
+		_, _ = fmt.Fprintf(e.Out, "  %s\n", l)
+	}
+	_, _ = fmt.Fprintln(e.Out, "Delete them if you no longer need them. --remove-leftovers removes them as part of the uninstall.")
 }
 
 // handOver is Uninstall for a copy that is not inside an install: it runs

@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -660,4 +661,85 @@ func TestThousandsOfFilesInstallAndUninstall(t *testing.T) {
 	require.Equal(t, 0, code, out)
 	t.Logf("uninstall: %s", time.Since(start).Round(time.Millisecond))
 	require.Equal(t, before, h.snap(t))
+}
+
+// A runtime-shaped payload, as a bundled Python is: library version links,
+// a program link and a directory link, all inside the payload. The program
+// then writes a bytecode cache, which uninstall.remove names, and a file
+// nobody named, which is a leftover.
+func TestARuntimeWithLinksInstallsAndUninstallsWithItsLeftovers(t *testing.T) {
+	require.NoError(t, setupFail)
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"rt/lib/libffi.so.8.4.0": "ELF ffi", "rt/lib/python/os.py": "# os\n", "rt/bin/python3.14": "#!/bin/sh\necho py\n",
+	} {
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o750))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o600))
+	}
+	for link, target := range map[string]string{
+		"rt/lib/libffi.so.8": "libffi.so.8.4.0", "rt/lib/libffi.so": "libffi.so.8", "rt/lib64": "lib", "rt/bin/python3": "python3.14",
+	} {
+		require.NoError(t, os.Symlink(target, filepath.Join(dir, filepath.FromSlash(link))))
+	}
+	cfg := "app:\n  id: io.example.rt\n  name: Runtime\n  version: 1.0.0\npayload:\n  - src: rt/\n    dst: python/\n" +
+		"uninstall:\n  remove: [\"python/**/__pycache__\"]\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fynstall.yaml"), []byte(cfg), 0o600))
+	repo, err := filepath.Abs("..")
+	require.NoError(t, err)
+	arts, err := builder.Build(t.Context(), builder.Options{
+		Config: filepath.Join(dir, "fynstall.yaml"), OutDir: filepath.Join(dir, "dist"),
+		CLIOnly: true, RuntimePath: repo, RuntimeVersion: v1, Env: []string{"GOPROXY=off"},
+	})
+	require.NoError(t, err)
+
+	newRTHome := func() home {
+		h := newHome(t)
+		h.root = filepath.Join(h.dir, ".local", "share", "io.example.rt")
+		return h
+	}
+	install := func(h home) {
+		code, out := h.run(t, arts[0].Installer, "--yes")
+		require.Equal(t, 0, code, out)
+		target, err := os.Readlink(filepath.Join(h.root, "python", "lib64"))
+		require.NoError(t, err)
+		require.Equal(t, "lib", target)
+		b, err := os.ReadFile(filepath.Join(h.root, "python", "lib64", "libffi.so"))
+		require.NoError(t, err)
+		require.Equal(t, "ELF ffi", string(b))
+		for _, p := range []string{"python/lib/python/__pycache__/os.cpython-314.pyc", "python/lib/state.json"} {
+			p = filepath.Join(h.root, filepath.FromSlash(p))
+			require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o750))
+			require.NoError(t, os.WriteFile(p, []byte("made by the program"), 0o600))
+		}
+	}
+
+	h := newRTHome()
+	install(h)
+	code, out := h.run(t, filepath.Join(h.root, "uninstall"))
+	require.Equal(t, 0, code, out)
+	state := filepath.Join(h.root, "python", "lib", "state.json")
+	require.Contains(t, out, "Left 1 files the program made")
+	require.Contains(t, out, state)
+	require.NotContains(t, out, "__pycache__", "uninstall.remove took the cache without listing it")
+	left, err := snapshot.Take(h.root)
+	require.NoError(t, err)
+	require.Equal(t, []string{".", "python", "python/lib", "python/lib/state.json"}, keys(left), "only the leftover and the directories that hold it")
+
+	h = newRTHome()
+	before := h.snap(t)
+	install(h)
+	code, out = h.run(t, filepath.Join(h.root, "uninstall"), "--remove-leftovers")
+	require.Equal(t, 0, code, out)
+	require.NotContains(t, out, "Left ")
+	require.Equal(t, before, h.snap(t))
+}
+
+func keys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

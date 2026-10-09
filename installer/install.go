@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 
 	"github.com/ushineko/fynstall/engine"
 	"github.com/ushineko/fynstall/manifest"
@@ -198,7 +199,7 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 			replaced = append(replaced, f.Dst)
 		}
 	}
-	for _, l := range p.Links {
+	for _, l := range slices.Concat(p.Symlinks, p.Links) {
 		if l.Exists {
 			replaced = append(replaced, l.Dst)
 		}
@@ -225,7 +226,7 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 		}
 		_, _ = fmt.Fprintf(e.Out, "  %s %s (%o%s)\n", verb, f.Dst, f.Mode, note)
 	}
-	for _, l := range p.Links {
+	for _, l := range slices.Concat(p.Symlinks, p.Links) {
 		verb := "link    "
 		if l.Exists {
 			verb = "replace "
@@ -274,12 +275,14 @@ func forceUninstall(ix *engine.Index, e Env, verbose bool) int {
 	}
 	_, _ = fmt.Fprintf(e.Out, "Removing %s %s with this installer's engine, not its own uninstaller.\n", r.App.Name, r.App.Version)
 	report := reporter(e, verbose)
-	if err := engine.Uninstall(r, report); err != nil {
+	left, err := engine.Uninstall(r, report)
+	if err != nil {
 		_, _ = fmt.Fprintf(e.Err, "%v\n", err)
 		return exitFail
 	}
 	if r.RefreshMenu {
 		refreshMenu(report)
 	}
+	printLeftovers(e, left, verbose)
 	return exitOK
 }

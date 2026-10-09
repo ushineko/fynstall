@@ -141,6 +141,11 @@ func validate(c *Config, root *yaml.Node) Errors {
 	for i, p := range c.Integration.KeepOnUninstall {
 		k.template(p, "integration.keep_on_uninstall", "integration", "keep_on_uninstall", i)
 	}
+	for i, p := range c.Uninstall.Remove {
+		if msg := manifest.CheckPattern(p); msg != "" {
+			k.fail(k.line("uninstall", "remove", i), "uninstall.remove", "%s", msg)
+		}
+	}
 
 	if len(c.Payload) == 0 {
 		k.fail(k.line("payload"), "payload", "at least one entry is required")

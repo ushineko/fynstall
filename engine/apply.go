@@ -142,6 +142,12 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 		j.progress(f.Dst)
 		report.emit(Detail, "%s", f.Dst)
 	}
+	for _, l := range p.Symlinks {
+		if err := j.link(l.Dst, l.Target, l.Exists); err != nil {
+			return nil, err
+		}
+		report.emit(Detail, "%s -> %s", l.Dst, l.Target)
+	}
 
 	if len(p.Links) > 0 {
 		report.step(steps, StepLinks)
@@ -158,7 +164,7 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 		Schema: ReceiptSchema, RuntimeVersion: p.Manifest.RuntimeVersion,
 		App: p.Manifest.App, Scope: p.Scope, Root: p.Root,
 		Uninstaller: filepath.Join(p.Root, UninstallName), Index: p.Index, Keep: p.Keep,
-		RefreshMenu: p.RefreshMenu,
+		RefreshMenu: p.RefreshMenu, Remove: p.Manifest.UninstallRemove,
 	}
 	for _, d := range p.Manifest.Parameters {
 		if d.Secret {
@@ -289,10 +295,22 @@ func (j *journal) save(dst string, e *Entry) error {
 	return copyFile(dst, filepath.Join(backupDir(j.root), e.Backup))
 }
 
-// undo reverses the journal: files first, newest first, then directories,
-// deepest first. A path at or under one of keep is never touched. Problems
-// are collected, not fatal, so one stuck file does not leave the rest.
+// undo reverses the journal: files first, newest first, then the receipt,
+// then directories, deepest first. A path at or under one of keep is never
+// touched.
 func (j *journal) undo(keep []string) error {
+	if err := j.undoFiles(keep); err != nil {
+		return err
+	}
+	_ = os.Remove(ReceiptPath(j.root))
+	j.removeDirs(keep, nil)
+	return nil
+}
+
+// undoFiles removes the files the journal created and puts back those it
+// replaced, newest first. Problems are collected, not fatal, so one stuck
+// file does not leave the rest.
+func (j *journal) undoFiles(keep []string) error {
 	var errs []error
 	for i := len(j.entries) - 1; i >= 0; i-- {
 		e := j.entries[i]
@@ -315,22 +333,24 @@ func (j *journal) undo(keep []string) error {
 			errs = append(errs, err)
 		}
 	}
-	if len(errs) > 0 {
-		// Directories stay until every file is dealt with, so a second run
-		// still finds the receipt.
-		return errors.Join(errs...)
-	}
-	_ = os.Remove(ReceiptPath(j.root))
+	// Directories stay until every file is dealt with, so a second run
+	// still finds the receipt.
+	return errors.Join(errs...)
+}
+
+// removeDirs removes the directories the journal created that are empty,
+// deepest first. One that is not empty is left with a warning, unless
+// listed says its contents are reported another way.
+func (j *journal) removeDirs(keep []string, listed func(string) bool) {
 	for i := len(j.entries) - 1; i >= 0; i-- {
 		e := j.entries[i]
 		if e.Op != OpMkdir || kept(e.Path, keep) {
 			continue
 		}
-		if err := os.Remove(e.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := os.Remove(e.Path); err != nil && !errors.Is(err, fs.ErrNotExist) && (listed == nil || !listed(e.Path)) {
 			j.report.emit(Warn, "left %s: it is not empty", e.Path)
 		}
 	}
-	return nil
 }
 
 func (j *journal) restore(e Entry) error {

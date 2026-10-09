@@ -57,6 +57,8 @@ func TestEveryErrorHasItsLineAndField(t *testing.T) {
 		{"missing src file", "app:\n  id: io.example.hello\n  name: Hello\n  version: 0.1.0\npayload:\n  - src: bin/nope\n    dst: bin/hello\n", 6, "payload[0].src", "does not exist"},
 		{"no payload", "app:\n  id: io.example.hello\n  name: Hello\n  version: 0.1.0\n", 1, "payload", "at least one"},
 		{"unknown target", valid + "targets: [plan9/386]\n", 8, "targets", "unknown target"},
+		{"remove pattern leaves", valid + "uninstall:\n  remove: [\"python/**/__pycache__\", \"../cache\"]\n", 9, "uninstall.remove", "reaches outside the install directory"},
+		{"remove pattern absolute", valid + "uninstall:\n  remove:\n    - /var/cache/x\n", 10, "uninstall.remove", "is absolute"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

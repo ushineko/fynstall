@@ -389,7 +389,10 @@ func uninstallConfirm(r *engine.Receipt, skip bool) wizard.ConfirmOptions {
 		SkipQuestion: skip,
 		Job: func(context.Context) error {
 			report := func(engine.Event) {}
-			if err := engine.Uninstall(r, report); err != nil {
+			// The leftovers are not shown yet: the window's result is one
+			// line, set before the job runs. The list and "Remove them
+			// too" wait for fynedesygn (spec 002 phase 3).
+			if _, err := engine.Uninstall(r, report); err != nil {
 				return err
 			}
 			if r.RefreshMenu {
