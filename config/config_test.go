@@ -203,3 +203,35 @@ func TestMatches(t *testing.T) {
 	require.True(t, Matches([]string{"*/arm64"}, "linux/arm64"))
 	require.False(t, Matches([]string{"windows/*", "*/arm64"}, "linux/amd64"))
 }
+
+func TestParametersAndConfigFilesAreChecked(t *testing.T) {
+	head := "app:\n  id: io.example.hello\n  name: Hello\n  version: 0.1.0\npayload:\n  - src: bin/hello\n    dst: bin/hello\n"
+	cases := []struct {
+		name, extra, field, want string
+		line                     int
+	}{
+		{"a valid pair", "parameters:\n  - name: server\n    default: x\nactions:\n  - config_file:\n      path: \"{config}/hello/config.yml\"\n      values: {server: \"{param:server}\"}\n", "", "", 0},
+		{"a reserved name", "parameters:\n  - name: dir\n", "parameters[0].name", "installer's own flags", 9},
+		{"a bad name", "parameters:\n  - name: Server\n", "parameters[0].name", "not a parameter name", 9},
+		{"a secret with a default", "parameters:\n  - name: token\n    secret: true\n    default: abc\n", "parameters[0].default", "a secret has no default", 11},
+		{"a path inside nothing", "actions:\n  - config_file:\n      path: /etc/hello.yml\n      values: {a: b}\n", "actions[0].config_file.path", "must start with {config}/", 10},
+		{"no format", "actions:\n  - config_file:\n      path: \"{config}/hello/config\"\n      values: {a: b}\n", "actions[0].config_file.format", "say format", 9},
+		{"an undeclared parameter", "actions:\n  - config_file:\n      path: \"{config}/hello.json\"\n      values: {a: \"{param:nope}\"}\n", "actions[0].config_file.values.a", "{param:nope} names no parameter", 11},
+		{"a later action type", "actions:\n  - service:\n      name: hello\n", "actions[0]", "arrive in spec 002 phase 3", 9},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(write(t, head+tc.extra))
+			if tc.want == "" {
+				require.NoError(t, err)
+				return
+			}
+			var errs Errors
+			require.True(t, errors.As(err, &errs), "%v", err)
+			require.Len(t, errs, 1, "%v", errs)
+			require.Equal(t, tc.field, errs[0].Field)
+			require.Equal(t, tc.line, errs[0].Line, "%v", errs[0])
+			require.Contains(t, errs[0].Msg, tc.want)
+		})
+	}
+}

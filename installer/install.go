@@ -23,6 +23,7 @@ const guiAvailable = false
 type installFlags struct {
 	cli, gui, yes, dryRun, uninstall, forceReceipt, verbose, version bool
 	dir, scope                                                       string
+	params                                                           map[string]string
 }
 
 // Install runs the installer and returns its exit code.
@@ -44,9 +45,11 @@ func Install(args []string, p Payload, e Env) int {
 	fl.BoolVar(&f.version, "version", false, "print the version and exit")
 	fl.StringVar(&f.dir, "dir", "", "install directory (default from the installer)")
 	fl.StringVar(&f.scope, "scope", "", "install scope")
+	paramValues := paramFlags(fl, m)
 	if err := fl.Parse(args); err != nil {
 		return exitUsage
 	}
+	f.params = paramValues()
 	if f.version {
 		_, _ = fmt.Fprintf(e.Out, "%s %s installer (fynstall %s)\n", m.App.Name, m.App.Version, m.RuntimeVersion)
 		return exitOK
@@ -92,7 +95,21 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 		return exitUsage
 	}
 	ask := newAsker(e)
-	o := engine.Options{Scope: f.scope, Root: f.dir, Env: e.Getenv, Uninstaller: p.Uninstaller}
+	side, err := readSideFile(e.ExeDir, m)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
+		return exitUsage
+	}
+	var prompt func(manifest.Parameter) (string, error)
+	if !f.yes && !f.dryRun {
+		prompt = ask.parameter
+	}
+	params, err := resolveParams(m, f.params, side, prompt)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
+		return exitUsage
+	}
+	o := engine.Options{Scope: f.scope, Root: f.dir, Env: e.Getenv, Uninstaller: p.Uninstaller, Params: params}
 	plan, err := engine.NewPlan(m, o)
 	if err != nil {
 		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
@@ -193,7 +210,11 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 		if f.Exists {
 			verb = "replace "
 		}
-		_, _ = fmt.Fprintf(e.Out, "  %s %s (%o)\n", verb, f.Dst, f.Mode)
+		note := ""
+		if f.Secret {
+			note = ", holds a secret"
+		}
+		_, _ = fmt.Fprintf(e.Out, "  %s %s (%o%s)\n", verb, f.Dst, f.Mode, note)
 	}
 	for _, l := range p.Links {
 		verb := "link    "

@@ -33,7 +33,47 @@ type Config struct {
 	Install     Install     `yaml:"install"`
 	Payload     []Entry     `yaml:"payload"`
 	Integration Integration `yaml:"integration"`
+	Parameters  []Parameter `yaml:"parameters"`
+	Actions     []Action    `yaml:"actions"`
 	Targets     []string    `yaml:"targets"`
+}
+
+// Parameter is a value the installer asks for or is given (spec 002 D3a):
+// on the command line as --<name>=<value>, in fynstall-params.yml beside
+// the installer, or by a person. Actions use it as {param:<name>}.
+type Parameter struct {
+	Name        string `yaml:"name"`
+	Label       string `yaml:"label"`
+	Description string `yaml:"description"`
+	Default     string `yaml:"default"`
+	// Secret values are never logged, printed or recorded.
+	Secret   bool `yaml:"secret"`
+	Required bool `yaml:"required"`
+}
+
+// Action is one install-time action (spec 002 D2a). Exactly one field is
+// set. Only config_file exists so far; the others are accepted by the
+// parser so that a config written for a later version says which phase it
+// needs rather than "unknown key".
+type Action struct {
+	ConfigFile *FileAction `yaml:"config_file"`
+	// The later types are held as plain values: a strict decode into a
+	// yaml.Node still reports the keys inside it as unknown.
+	Service any `yaml:"service"`
+	Run     any `yaml:"run"`
+	Migrate any `yaml:"migrate"`
+}
+
+// FileAction writes a configuration file from parameters. The engine
+// writes it, so the installer does not run the program to produce it.
+type FileAction struct {
+	// Path starts with {config}, {data} or {home}: configuration lives
+	// outside the install directory, so it can be kept across upgrades.
+	Path string `yaml:"path"`
+	// Format is yaml or json; the default comes from Path's extension.
+	Format string `yaml:"format"`
+	// Values are written as one flat map, keys sorted.
+	Values map[string]string `yaml:"values"`
 }
 
 // App identifies the program.

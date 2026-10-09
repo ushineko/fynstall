@@ -58,6 +58,9 @@ type PlannedFile struct {
 	Exists  bool
 	Source  Source
 	Content []byte
+	// Secret is true when Content holds a secret parameter's value. Its
+	// content is never printed; only its path is.
+	Secret bool
 }
 
 // PlannedLink is a symlink Apply will make.
@@ -86,6 +89,8 @@ type Plan struct {
 	// RefreshMenu is true when the install adds launcher entries or icons,
 	// so the front end asks the desktop to read them again.
 	RefreshMenu bool
+	// Params are the parameter values the install was planned with.
+	Params map[string]string
 }
 
 // Options are the choices a front end passes to NewPlan.
@@ -97,6 +102,9 @@ type Options struct {
 	Env func(string) string
 	// Uninstaller is the uninstaller binary Apply installs beside the program.
 	Uninstaller []byte
+	// Params are the parameter values, already resolved by the front end
+	// from flags, the side file, a person or the defaults.
+	Params map[string]string
 }
 
 // ErrInstalled is returned by NewPlan when the index already has this app.
@@ -156,6 +164,10 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 		return nil, err
 	}
 	if err := p.addIntegration(vars); err != nil {
+		return nil, err
+	}
+	p.Params = o.Params
+	if err := p.addConfigFiles(vars, o.Params); err != nil {
 		return nil, err
 	}
 

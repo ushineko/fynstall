@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -127,6 +128,8 @@ func validate(c *Config, root *yaml.Node) Errors {
 	}
 	k.links(c)
 	k.desktop(c)
+	k.parameters(c)
+	k.actions(c)
 	for i, p := range c.Integration.KeepOnUninstall {
 		k.template(p, "integration.keep_on_uninstall", "integration", "keep_on_uninstall", i)
 	}
@@ -296,6 +299,113 @@ func (k *checker) desktop(c *Config) {
 		for j, cat := range d.Categories {
 			if !categoryRE.MatchString(cat) {
 				k.fail(k.line("integration", "desktop", i, "categories", j), field+".categories", "%q is not a category name", cat)
+			}
+		}
+	}
+}
+
+var paramRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// ReservedParameters are the installer's own flags, which a parameter
+// cannot be named, since each parameter is also a flag --<name>.
+var ReservedParameters = []string{"cli", "gui", "yes", "dry-run", "uninstall", "force-receipt-uninstall",
+	"verbose", "version", "dir", "scope", "help", "h"}
+
+func (k *checker) parameters(c *Config) {
+	seen := map[string]bool{}
+	for i, p := range c.Parameters {
+		field := fmt.Sprintf("parameters[%d]", i)
+		at := func(key string) int { return k.line("parameters", i, key) }
+		switch {
+		case !paramRE.MatchString(p.Name):
+			k.fail(at("name"), field+".name", "%q is not a parameter name: lowercase letters, digits and dashes, starting with a letter", p.Name)
+		case slices.Contains(ReservedParameters, p.Name):
+			k.fail(at("name"), field+".name", "%q is one of the installer's own flags (--%s)", p.Name, p.Name)
+		case seen[p.Name]:
+			k.fail(at("name"), field+".name", "two parameters are named %q", p.Name)
+		}
+		seen[p.Name] = true
+		if p.Secret && p.Default != "" {
+			k.fail(at("default"), field+".default", "a secret has no default: it would be published with the config")
+		}
+		if p.Required && p.Default != "" {
+			k.fail(at("default"), field+".default", "a required parameter has no default, or it would never be required")
+		}
+	}
+}
+
+// FileBases are the placeholders a config_file path may start with.
+var FileBases = []string{"config", "data", "home"}
+
+// FileFormat is a config_file's format: as given, else from the
+// path's extension, else "".
+func FileFormat(a *FileAction) string {
+	if a.Format != "" {
+		return a.Format
+	}
+	switch strings.ToLower(path.Ext(a.Path)) {
+	case ".yaml", ".yml":
+		return "yaml"
+	case ".json":
+		return "json"
+	}
+	return ""
+}
+
+func (k *checker) actions(c *Config) {
+	params := map[string]bool{}
+	for _, p := range c.Parameters {
+		params[p.Name] = true
+	}
+	for i, a := range c.Actions {
+		field := fmt.Sprintf("actions[%d]", i)
+		n := 0
+		for _, set := range []bool{a.ConfigFile != nil, a.Service != nil, a.Run != nil, a.Migrate != nil} {
+			if set {
+				n++
+			}
+		}
+		if n != 1 {
+			k.fail(k.line("actions", i), field, "an action is exactly one of config_file, service, run or migrate")
+			continue
+		}
+		if a.ConfigFile == nil {
+			k.fail(k.line("actions", i), field, "service, run and migrate actions arrive in spec 002 phase 3")
+			continue
+		}
+		k.configFile(a.ConfigFile, field+".config_file", params, "actions", i, "config_file")
+	}
+}
+
+func (k *checker) configFile(a *FileAction, field string, params map[string]bool, keys ...any) {
+	at := func(key string) int { return k.line(append(keys, key)...) }
+	base, rest, _ := strings.Cut(a.Path, "/")
+	if !strings.HasPrefix(base, "{") || !slices.Contains(FileBases, strings.Trim(base, "{}")) || rest == "" {
+		k.fail(at("path"), field+".path", "%q must start with {config}/, {data}/ or {home}/: configuration lives outside the install directory", a.Path)
+	} else if unknown := manifest.Unknown(a.Path); len(unknown) > 0 {
+		k.fail(at("path"), field+".path", "unknown placeholder {%s}", strings.Join(unknown, "}, {"))
+	} else if msg := CheckDst(rest); msg != "" {
+		k.fail(at("path"), field+".path", "%s", msg)
+	}
+	if f := FileFormat(a); f != "yaml" && f != "json" {
+		k.fail(at("format"), field+".format", "say format: yaml or json (the path's extension does not say which)")
+	}
+	if len(a.Values) == 0 {
+		k.fail(at("values"), field+".values", "at least one value is required")
+	}
+	keysSorted := make([]string, 0, len(a.Values))
+	for key := range a.Values {
+		keysSorted = append(keysSorted, key)
+	}
+	sort.Strings(keysSorted)
+	for _, key := range keysSorted {
+		for _, name := range manifest.UnknownIn(a.Values[key], manifest.Placeholders) {
+			ref, ok := strings.CutPrefix(name, "param:")
+			switch {
+			case !ok:
+				k.fail(at("values"), field+".values."+key, "unknown placeholder {%s}", name)
+			case !params[ref]:
+				k.fail(at("values"), field+".values."+key, "{param:%s} names no parameter", ref)
 			}
 		}
 	}

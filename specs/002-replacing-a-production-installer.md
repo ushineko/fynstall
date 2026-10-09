@@ -398,6 +398,40 @@ Phase 1, per-target payloads:
       uninstall it. Run the arm64 installer's `--dry-run` under
       `qemu-aarch64` and see the arm64-only file in its plan.
 
+Phase 2, parameters (CLI part; the wizard page lands with spec 001 phase 4):
+
+- [x] `parameters` and the `config_file` action in the config, with
+      validation: names (and clashes with the installer's own flags), a
+      secret or required parameter with a default, the path's base, the
+      format, and `{param:x}` naming a declared parameter
+      (`TestParametersAndConfigFilesAreChecked`). `service`, `run` and
+      `migrate` are accepted by the parser and refused with the phase that
+      adds them.
+- [x] Sources in order: flag, `fynstall-params.yml`, a person, default. A
+      required parameter left empty names its flag; a side file with a name
+      that is not a parameter is refused
+      (`TestAFlagBeatsTheSideFileWhichBeatsAPersonWhoBeatsTheDefault`,
+      `TestARequiredParameterNamesItsFlag`,
+      `TestTheSideFileRefusesANameThatIsNotAParameter`, and the real-process
+      `TestParametersComeFromAFlagThenTheSideFileThenTheDefault`,
+      `TestASideFileWithAnUnknownNameIsRefused`).
+- [x] `config_file` is rendered with sorted keys and quoted values, written
+      `0600` when it holds a secret, removed by the uninstaller, and kept
+      when its path is kept (`TestAConfigFileIsRenderedFromParametersAndHoldsItsSecretPrivately`,
+      `TestAConfigFileInAKeptPathSurvivesTheUninstall`, `TestRenderJSON`).
+- [x] The receipt records non-secret values and the names of secrets. A
+      secret passed through `--dry-run`, a verbose install and a verbose
+      uninstall appears in no output and in no file but its config file
+      (`TestASecretNeverLeavesTheConfigFile`). A mutation that recorded
+      secrets in the receipt failed it.
+- [ ] The wizard has a parameters page, with secrets as password entries
+      (spec 001 phase 4).
+- [x] Desk check: a CLI install that takes a value from each source, with
+      a secret typed at a prompt, and shows them in the written config
+      file. Flag, file and prompt in one run; the default is covered by
+      the precedence tests, since three parameters cannot show four
+      sources at once.
+
 Experiment (phase 4):
 
 - [ ] A fynstall config installs the reference program on Windows 11 per
@@ -470,3 +504,23 @@ On CachyOS (amd64) with KDE Plasma 6. `make test` (with `-race`),
 - Found on the way: `[bin/greet{exe}]` is not valid YAML, because `{` in a
   flow list starts a mapping. The example uses a block list and
   `docs/config.md` says how to quote it.
+
+### Phase 2, CLI part (2026-10-08)
+
+Same machine. `make test` (with `-race`), `make lint` (0 issues) and
+`govulncheck` (no vulnerabilities) pass.
+
+- In Konsole, the greet installer with `fynstall-params.yml` beside it
+  (`greeting`) and `--name=…` asked only for the access token, without
+  echo, then for the directory and the confirmation.
+- The written `~/.config/io.ushineko.greet/config.json` held the greeting
+  from the file, the name from the flag and the typed token, mode `600`.
+  The installed `greet` printed `hi-from-the-file from linux/amd64,
+  from-the-flag (with a token)`, never the token.
+- After the uninstall, the listings of `~/.local/share`, `~/.config` and
+  `~/.local/bin` matched those taken before.
+- The first attempt ended at "Install? [y/N]" with "Nothing was changed":
+  Enter is No. A pseudo-terminal run with the same answers and `y`
+  installed, which ruled out the hidden prompt leaving the terminal in a
+  bad state. The default stays No; the wizard in spec 001 phase 4 asks
+  with buttons instead.

@@ -101,6 +101,16 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 		Uninstaller: filepath.Join(p.Root, UninstallName), Index: p.Index, Keep: p.Keep,
 		RefreshMenu: p.RefreshMenu,
 	}
+	for _, d := range p.Manifest.Parameters {
+		if d.Secret {
+			rcpt.Secrets = append(rcpt.Secrets, d.Name)
+			continue
+		}
+		if rcpt.Parameters == nil {
+			rcpt.Parameters = map[string]string{}
+		}
+		rcpt.Parameters[d.Name] = p.Params[d.Name]
+	}
 	ix, err := marshal(Index{Root: p.Root, Uninstaller: rcpt.Uninstaller, Version: p.Manifest.App.Version, Scope: p.Scope})
 	if err != nil {
 		return nil, err
