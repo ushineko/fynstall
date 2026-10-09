@@ -347,10 +347,12 @@ Settled while building it (2026-10-09):
   removed, never followed; kept paths are skipped. All of it goes through
   an `os.Root` opened on the install directory, so a link put in place of
   a directory while the uninstaller runs cannot carry a removal outside it.
-- **The window waits for fynedesygn.** The uninstall window's result is one
-  line, set before the job runs, and it has no second action. Listing the
-  leftovers and "Remove them too" need a fynedesygn change; the command
-  line has both now.
+- **The window asks a second question.** The uninstall window's result was
+  one line, set before the job ran, with no second action. fynedesygn
+  spec 066 ([#193](https://github.com/ushineko/fynedesygn/issues/193),
+  v0.1.95) added `ConfirmStep`: after the uninstall, the window lists the
+  leftovers (the first 50 by name) and offers "Keep them" or "Remove them
+  too".
 
 For Python there is also a fix at build time: compiling the bytecode when
 the payload is built, with hash-based `.pyc` files (Go embedding does not
@@ -598,9 +600,10 @@ Phase 3, real runtimes:
       path. (`TestLeftoversAreListedNotDeletedUntilAskedFor`,
       `TestADirectoryThatWasThereBeforeHoldsNoLeftovers`,
       `TestARuntimeWithLinksInstallsAndUninstallsWithItsLeftovers`.)
-- [ ] D5 The uninstall window lists the leftovers and offers "Remove them
-      too", which deletes exactly those. Needs a fynedesygn change to the
-      confirm window's result.
+- [x] D5 The uninstall window lists the leftovers and offers "Remove them
+      too", which deletes exactly those
+      (`TestTheUninstallWindowOffersToRemoveTheLeftovers`, fynedesygn
+      spec 066).
 - [x] D5 `uninstall.remove` patterns are removed without asking; a pattern
       with `..` or an absolute path is a config error.
       (`TestUninstallRemoveDeletesWhatItsPatternsMatchAndNothingElse`,
@@ -664,6 +667,22 @@ Experiment (phase 5):
 ## Verification
 
 Filled in as each phase lands.
+
+### Phase 3, the window (2026-10-09)
+
+On CachyOS with KDE Plasma 6 on Wayland, with fynedesygn v0.1.95. `make
+test` (with `-race`), `make lint` (0 issues) and `govulncheck` (no
+vulnerabilities) pass.
+
+- The user ran the fynedesygn example of the second question through both
+  buttons and with `--yes`, and reports that it works and the buttons do
+  not move.
+- `TestTheUninstallWindowOffersToRemoveTheLeftovers` drives the real
+  uninstall window headless against the real engine. With "Keep them" the
+  file the program made stays; with "Remove them too" the home matches its
+  listing before the install.
+- A program that leaves only empty folders is reported as such, and not as
+  "0 files".
 
 ### Phase 3, CLI part (2026-10-09)
 

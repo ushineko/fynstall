@@ -108,8 +108,9 @@ MIT. See [LICENSE](LICENSE).
   installed as a link, or as a copy for a Windows target, and one that
   leaves its entry is refused. `uninstall.remove` names the files a program
   makes, such as a bytecode cache, for the uninstaller to remove. Other files
-  the program left in the install directory are listed, not deleted, and
-  `--remove-leftovers` deletes them
+  the program left in the install directory are listed, not deleted; the
+  uninstall window offers "Remove them too", and `--remove-leftovers` does
+  the same on the command line. Needs fynedesygn v0.1.95
   ([#6](https://github.com/ushineko/fynstall/issues/6)).
 
 - Design: spec 002 takes MSI as its reference model, adds uninstall hooks

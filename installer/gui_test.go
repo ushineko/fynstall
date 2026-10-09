@@ -182,3 +182,50 @@ func TestTheUninstallerAsksOnceThenRemoves(t *testing.T) {
 		})
 	}
 }
+
+// The program made a file in the install directory: the window lists it
+// after the uninstall, and removes it only when asked.
+func TestTheUninstallWindowOffersToRemoveTheLeftovers(t *testing.T) {
+	for _, remove := range []bool{false, true} {
+		t.Run(fmt.Sprintf("remove=%v", remove), func(t *testing.T) {
+			m, p, e, home := guiFixture(t)
+			m.Parameters, m.ConfigFiles = nil, nil
+			before, err := snapshot.Take(home)
+			require.NoError(t, err)
+			plan, err := engine.NewPlan(m, engine.Options{Env: e.Getenv, Uninstaller: p.Uninstaller})
+			require.NoError(t, err)
+			r, err := engine.Apply(context.Background(), plan, p.Files, p.Uninstaller, nil)
+			require.NoError(t, err)
+			made := filepath.Join(r.Root, "state.db")
+			require.NoError(t, os.WriteFile(made, []byte("the program's"), 0o600))
+
+			c := wizard.HeadlessConfirm(fynetest.App(t), uninstallConfirm(r, false))
+			c.Act()
+			require.Equal(t, "Hello left 1 file it made.", c.Question())
+			require.Equal(t, "Hello 0.1.0 was removed.", c.Message())
+			if !remove {
+				c.Cancel() // Keep them
+				require.Equal(t, wizard.Finished, c.Result().Outcome)
+				_, err := os.Stat(made)
+				require.NoError(t, err, "kept")
+				return
+			}
+			c.Act()
+			require.Equal(t, "Hello 0.1.0 was removed, with the files it made.", c.Message())
+			after, err := snapshot.Take(home)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		})
+	}
+}
+
+func TestLeftoversDetailListsAtMostFiftyByName(t *testing.T) {
+	var left []engine.Leftover
+	for i := range 60 {
+		left = append(left, engine.Leftover{Path: fmt.Sprintf("/x/f%02d", i)})
+	}
+	d := leftoversDetail(left)
+	require.Contains(t, d, "`/x/f49`")
+	require.NotContains(t, d, "`/x/f50`")
+	require.Contains(t, d, "- and 10 more")
+}

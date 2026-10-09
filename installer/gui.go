@@ -373,8 +373,29 @@ func uninstallGUI(r *engine.Receipt, skip bool) int {
 	return exitOK
 }
 
+// leftoversDetail is the Markdown under the leftovers question: why they
+// were left, and their paths.
+func leftoversDetail(left []engine.Leftover) string {
+	var b strings.Builder
+	b.WriteString("The install did not create these, so they were left. Keep them if the program's data matters to you.\n\n")
+	for i, l := range left {
+		if i == shownLeftoversGUI {
+			fmt.Fprintf(&b, "- and %d more\n", len(left)-i)
+			break
+		}
+		fmt.Fprintf(&b, "- `%s`\n", l)
+	}
+	return b.String()
+}
+
+// shownLeftoversGUI is how many leftovers the window lists by name.
+const shownLeftoversGUI = 50
+
 // uninstallConfirm is the uninstaller's question, its job and its result.
+// When the program left files the install did not create, the window then
+// lists them and offers to remove them too (spec 002 D5).
 func uninstallConfirm(r *engine.Receipt, skip bool) wizard.ConfirmOptions {
+	var left []engine.Leftover
 	detail := fmt.Sprintf("It removes `%s`, and puts back anything its install replaced.", r.Root)
 	for _, k := range r.Keep {
 		detail += fmt.Sprintf("\n\nYour data in `%s`, if any, is left where it is.", k)
@@ -389,16 +410,24 @@ func uninstallConfirm(r *engine.Receipt, skip bool) wizard.ConfirmOptions {
 		SkipQuestion: skip,
 		Job: func(context.Context) error {
 			report := func(engine.Event) {}
-			// The leftovers are not shown yet: the window's result is one
-			// line, set before the job runs. The list and "Remove them
-			// too" wait for fynedesygn (spec 002 phase 3).
-			if _, err := engine.Uninstall(r, report); err != nil {
+			var err error
+			if left, err = engine.Uninstall(r, report); err != nil {
 				return err
 			}
 			if r.RefreshMenu {
 				refreshMenu(report)
 			}
 			return nil
+		},
+		Then: &wizard.ConfirmStep{
+			Action: "Remove them too", Destructive: true, Decline: "Keep them",
+			Ask: func() (string, string, bool) {
+				return fmt.Sprintf("%s left %s it made.", r.App.Name, leftoverCount(left)), leftoversDetail(left), len(left) > 0
+			},
+			Job: func(context.Context) error {
+				return engine.RemoveLeftovers(r, left, func(engine.Event) {})
+			},
+			Done: fmt.Sprintf("%s %s was removed, with the files it made.", r.App.Name, r.App.Version),
 		},
 	}
 }
