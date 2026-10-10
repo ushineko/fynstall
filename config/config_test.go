@@ -112,6 +112,7 @@ func TestIntegrationKeysAreChecked(t *testing.T) {
 		{"icon not a png", "  icon: bin/hello\n", 5, "app.icon", "not a PNG"},
 		{"duplicate link name", "integration:\n  path_links: [bin/hello, other/hello]\n", 9, "integration.path_links", `two links are named "hello"`},
 		{"desktop without exec", "integration:\n  desktop:\n    - name: Hello\n", 10, "integration.desktop[0].exec", "required"},
+		{"bad keyword", "integration:\n  desktop:\n    - name: Hello\n      exec: bin/hello\n      keywords: [\"a;b\"]\n", 12, "integration.desktop[0].keywords", "not a keyword"},
 		{"bad category", "integration:\n  desktop:\n    - name: Hello\n      exec: bin/hello\n      categories: [\"Not one\"]\n", 12, "integration.desktop[0].categories", "not a category"},
 	}
 	for _, tc := range cases {
@@ -296,4 +297,11 @@ func TestASystemInstallHasNoHome(t *testing.T) {
 
 	_, err = Load(write(t, strings.Replace(c, "[user, system]", "[user]", 1)))
 	require.NoError(t, err, "a per-user install has a home")
+}
+
+func TestADesktopEntryIsMatchedToItsWindowByItsID(t *testing.T) {
+	c, err := Load(write(t, valid+"integration:\n  desktop:\n    - name: Hello\n      exec: bin/hello\n    - id: io.example.tool\n      name: Tool\n      exec: bin/hello\n      terminal: true\n"))
+	require.NoError(t, err)
+	require.Equal(t, "io.example.hello", c.Integration.Desktop[0].StartupWMClass, "Fyne's window class is the app ID")
+	require.Empty(t, c.Integration.Desktop[1].StartupWMClass, "a terminal program has no window of its own")
 }

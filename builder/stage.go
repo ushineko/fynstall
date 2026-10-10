@@ -208,6 +208,7 @@ func integrate(c *config.Config, m *manifest.Manifest, payload map[string]string
 		m.Desktop = append(m.Desktop, manifest.Desktop{
 			ID: d.ID, Name: d.Name, Comment: d.Comment, Exec: exec, Args: d.Args,
 			Categories: d.Categories, Terminal: d.Terminal, Icon: c.App.Icon != "",
+			GenericName: d.GenericName, Keywords: d.Keywords, StartupNotify: d.StartupNotify, StartupWMClass: d.StartupWMClass,
 		})
 	}
 	return nil

@@ -107,6 +107,12 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- Launcher entries take `generic_name`, `keywords`, `startup_notify` and
+  `startup_wm_class`, which defaults to the entry's ID so X11 taskbars match
+  a Fyne window to it. Found by comparing fynstall with clockwork-orange's
+  `install.sh` (spec 001 phase 6b), which the spec records with the gaps
+  still open ([#1](https://github.com/ushineko/fynstall/issues/1)).
+
 - Upgrade, repair and downgrade (spec 001 phase 6a, R17): an installer run
   over an installed version replaces it through that version's own
   uninstaller, keeps the parameters it was given (secrets read back from

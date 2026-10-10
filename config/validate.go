@@ -333,7 +333,7 @@ func (k *checker) desktop(c *Config) {
 		if strings.TrimSpace(d.Name) == "" {
 			k.fail(at("name"), field+".name", "required")
 		}
-		for key, v := range map[string]string{"name": d.Name, "comment": d.Comment} {
+		for key, v := range map[string]string{"name": d.Name, "comment": d.Comment, "generic_name": d.GenericName, "startup_wm_class": d.StartupWMClass} {
 			if strings.ContainsFunc(v, unicode.IsControl) {
 				k.fail(at(key), field+"."+key, "must be one line of text")
 			}
@@ -343,6 +343,11 @@ func (k *checker) desktop(c *Config) {
 		} else if !k.buildTemplate(d.Exec, field+".exec", "integration", "desktop", i, "exec") {
 			if msg := CheckDst(d.Exec); msg != "" {
 				k.fail(at("exec"), field+".exec", "%s", msg)
+			}
+		}
+		for j, kw := range d.Keywords {
+			if strings.TrimSpace(kw) == "" || strings.ContainsAny(kw, ";") || strings.ContainsFunc(kw, unicode.IsControl) {
+				k.fail(k.line("integration", "desktop", i, "keywords", j), field+".keywords", "%q is not a keyword: one word or phrase, without ;", kw)
 			}
 		}
 		for j, cat := range d.Categories {

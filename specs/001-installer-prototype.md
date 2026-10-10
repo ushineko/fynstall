@@ -557,10 +557,24 @@ Phase 6a:
 
 Phase 6b:
 
-- [ ] First consumer: a `fynstall.yaml` for clockwork-orange that produces the
+Settled for 6b (2026-10-09): the comparison is the point; the gaps it
+finds are listed, and the one the maintainer chose is closed here (the
+launcher entry's keys). Optional components (`--no-gui`) and a version set
+by the build are listed under Later. The `fynstall.yaml` stays with this
+spec's Verification; moving it into clockwork-orange is that project's
+decision.
+
+- [x] First consumer: a `fynstall.yaml` for clockwork-orange that produces the
       same files as its `install.sh` (two binaries, `.desktop`, seven icon
-      sizes, the `--no-gui` equivalent as a component). The two results are
-      compared with `diff` of file lists in two temp homes.
+      sizes), compared with `diff` of file lists in two temp homes, each
+      difference fixed, accepted or listed under Later. The `--no-gui`
+      equivalent needs optional components, listed under Later.
+- [x] The launcher entry takes `generic_name`, `keywords`,
+      `startup_notify` and `startup_wm_class` (default: the entry's ID),
+      and clockwork-orange's entry is reproduced key for key
+      (`TestTheLauncherKeysAreWrittenAsGiven`,
+      `TestADesktopEntryIsMatchedToItsWindowByItsID`, and
+      `desktop-file-validate`).
 
 ### Phase 7: Windows (R18, R19, R9f, registry restore in R9a/R9d)
 
@@ -587,6 +601,12 @@ macOS `.app` bundle into `~/Applications` or `/Applications`, and
 notarisation. Payload compression. Auto-update. A file association and
 URL-scheme registration. (Authenticode signing and install-time actions,
 listed here at first, moved to spec 002.)
+
+Found by the first consumer (phase 6b): optional components, so a person
+can leave out part of the payload, such as clockwork-orange's window
+(`install.sh --no-gui`); and an app version set by the build
+(`fynstall build --app-version`), so a Makefile that derives its version
+from git can pass it.
 
 ## Test Strategy
 
@@ -712,6 +732,56 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 6b (2026-10-09)
+
+clockwork-orange at `df6acba`, in a local clone (its own checkouts were
+not touched). `install.sh` built both programs; the same two binaries were
+the payload of this config:
+
+```yaml
+app:
+  id: io.ushineko.clockwork-orange
+  name: Clockwork Orange
+  version: 0.0.0
+  publisher: ushineko
+  icon: packaging/icons/clockwork-orange-512x512.png
+payload:
+  - src: bin/clockwork-orange
+    dst: bin/clockwork-orange
+  - src: bin/clockwork-orange-gui
+    dst: bin/clockwork-orange-gui
+integration:
+  path_links: [bin/clockwork-orange, bin/clockwork-orange-gui]
+  desktop:
+    - name: Clockwork Orange
+      comment: Wallpaper and lock screen manager for KDE Plasma 6
+      exec: bin/clockwork-orange-gui
+      generic_name: Wallpaper manager
+      categories: [Graphics]
+      keywords: [wallpaper, desktop, background, lockscreen, kde, plasma]
+      startup_notify: true
+```
+
+Each was installed into its own temporary home, and the file lists were
+compared:
+
+| | `install.sh` | fynstall | Verdict |
+|---|---|---|---|
+| Programs | copied into `~/.local/bin` | in `{data}/{id}/bin`, linked from `~/.local/bin` | accepted: the install directory holds what the uninstaller removes |
+| Launcher entry | `io.ushineko.clockwork-orange.desktop` | the same name | the same |
+| Entry keys | `GenericName`, `Keywords`, `StartupNotify`, `StartupWMClass` | none of them | fixed: the four keys; the entries now match key for key, apart from the next three rows |
+| `Exec` | `clockwork-orange-gui` | the absolute path | accepted: works without `~/.local/bin` on `PATH` |
+| `Icon` | `clockwork-orange` | the app ID | accepted: one name for the icon, the entry and the Wayland `app_id` |
+| Uninstall | `uninstall.sh` in the checkout | uninstaller, record and index installed, an Uninstall action in the entry | fynstall's model |
+| Icons | 7 sizes, 16 to 512 | the same 7 sizes | the same |
+| Caches | `update-desktop-database` and `gtk-update-icon-cache` rewrite `mimeinfo.cache` and `icon-theme.cache` | `kbuildsycoca6` | accepted (R15): the entry declares no MIME types |
+| Legacy entry | removes a Python-era `clockwork-orange.desktop` when it points at `clockwork-orange.py` | nothing | accepted: a conditional delete of a file the install did not make is what MSI does not do |
+| `--no-gui` | installs the command line only | not possible | Later: optional components |
+| Version | from git, by the Makefile | fixed in the config | Later: a version set by the build |
+
+`desktop-file-validate` passed on fynstall's entry. The uninstall left the
+home as it was, apart from KDE's menu cache in `.cache`.
 
 ### Phase 6a (2026-10-09)
 
