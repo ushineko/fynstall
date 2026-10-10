@@ -595,6 +595,57 @@ decision.
 - [ ] Windows backends for the actions (spec 002 D2a: `service` through the
       SCM, with recovery actions) and spec 002 L1, L2, L6, L7 and L8.
 
+Carried from the Linux phases (written 2026-10-09, before phase 7 starts).
+Phases 4b to 6b built these on Linux; each needs its Windows half, and some
+need a decision first.
+
+- [ ] Spec 002 L4 permissions (moved here from phase 5): one `permissions`
+      concept on a directory, with the roles `admins`, `service` and
+      `users`, turned into owner, group and mode on Linux and into an ACL on
+      Windows, journalled and restored. Decide first which account the
+      `service` role is (LocalSystem, a virtual service account, or a
+      `user:` on the service action) on both platforms.
+- [ ] Spec 002 L3 on Windows: the install lock is a named mutex per app ID
+      and scope (`Local\` for per-user, `Global\` for system), with the same
+      refusal message as on Linux.
+- [ ] The privileged helper under UAC (R13, R14): the installer and the
+      uninstaller stay the person's own processes and run themselves with
+      `--apply-plan` or `--apply-uninstall` through `ShellExecuteEx` with
+      `runas`. Decide first how events come back: `ShellExecuteEx` gives no
+      pipes, so the helper needs a named pipe (or a file) that only the
+      person and the helper can open, and a way for the parent to cancel it,
+      as stdin does on Linux. The plan file and its digest check are as on
+      Linux, in a directory only the person can write.
+- [ ] The window never runs elevated: an installer started as an
+      administrator uses the command line, or refuses `--gui`, as on Linux.
+- [ ] System paths and records: the install index for system scope (Linux
+      uses `/var/lib/fynstall/installs`; decide `%ProgramData%\fynstall\installs`
+      or the registry), the lock and the run directory, and what `{data}`,
+      `{config}` and `{bin}` are per scope. `docs/platforms.md` gets a
+      Windows section.
+- [ ] R9f, the uninstaller removing itself: a running `.exe` cannot delete
+      itself. Decide between `MoveFileEx` with `MOVEFILE_DELAY_UNTIL_REBOOT`
+      (needs administrator rights for system scope) and a copy of the
+      uninstaller run from `%TEMP%` that removes the original and then
+      itself at reboot. The install directory must be gone after a reboot.
+- [ ] Upgrade, repair and downgrade (phase 6a) on Windows: the old
+      `uninstall.exe` is probed with `-h` and run with `--upgrade` or
+      `--quiet`, a running service is stopped through the SCM before its
+      files are replaced, and a system upgrade asks for UAC once.
+- [ ] The leftovers question and `--remove-leftovers` (spec 002 D5) on
+      Windows, including the system case, where the elevated helper waits for
+      the answer as it does on Linux.
+- [ ] The Uninstall registry entry's `UninstallString` and
+      `QuietUninstallString` (L8) run the installed `uninstall.exe`, so
+      Settings > Apps goes through the installed uninstaller (R9e).
+- [ ] Spec 002 L10 on Windows: `integration.path_links` adds the install's
+      `bin` to the person's or the machine's `PATH`, recorded and restored
+      like any registry value, and `integration.desktop` makes a Start Menu
+      shortcut; the uninstall restores `PATH` as it was.
+- [ ] Payload symlinks become copies on a Windows target (spec 002 D4a,
+      done in the builder): a desk check installs a payload that has links
+      and runs the copied files.
+
 ### Later (not this spec)
 
 macOS `.app` bundle into `~/Applications` or `/Applications`, and
