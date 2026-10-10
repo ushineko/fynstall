@@ -163,9 +163,24 @@ func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, go
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 
+	// On Windows the installer and the uninstaller carry the app's icon as
+	// a resource, so Explorer shows it for the files themselves.
+	res := map[string][]byte{}
+	if ico, ok := generated[manifest.WindowsIcon]; ok && goos == "windows" {
+		list, err := iconResources(ico)
+		if err != nil {
+			return err
+		}
+		obj, err := resourceObject(goarch, list)
+		if err != nil {
+			return err
+		}
+		res[sysoName(goarch)] = obj
+	}
+
 	un := filepath.Join(work, "uninstaller")
 	unMain := fmt.Sprintf(uninstallerMain, app.ID, app.Name, app.Version)
-	if err := writeTree(un, mod, map[string][]byte{"main.go": []byte(unMain)}); err != nil {
+	if err := writeTree(un, mod, res, map[string][]byte{"main.go": []byte(unMain)}); err != nil {
 		return err
 	}
 	if err := goBuild(ctx, o, un, goos, goarch, a.GUI, a.Uninstaller); err != nil {
@@ -182,7 +197,7 @@ func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, go
 		"manifest.json":   manifestJSON,
 		"uninstaller.bin": unBytes,
 	}
-	if err := writeTree(in, mod, gen); err != nil {
+	if err := writeTree(in, mod, res, gen); err != nil {
 		return err
 	}
 	for _, f := range files {

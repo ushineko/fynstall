@@ -90,7 +90,7 @@ make setup        # installs the pinned golangci-lint
 make test
 make lint
 make build        # bin/fynstall
-make hello        # examples/hello/bin/hello, the program the tests install
+make hello        # examples/hello/bin/hello (hello.exe on Windows), the program the tests install
 make greet        # examples/greet for every target, the multi-target example
 make beacon       # examples/beacon, the example of services and other actions
 ```
@@ -108,6 +108,16 @@ MIT. See [LICENSE](LICENSE).
 ## Changelog
 
 ### Unreleased
+
+- `{programs}` and the icon of the installer on Windows (spec 001 phase
+  7b): the new placeholder `{programs}` is where the platform keeps
+  programs, and `{programs}/{id}` is the default install directory for both
+  scopes. On Linux that is the directory as before; on Windows it is
+  `%LOCALAPPDATA%\Programs\<id>`. An installer and an uninstaller for
+  Windows carry `app.icon` as a resource, so Explorer shows it.
+  `examples/hello` uses `{exe}` and `{programs}`, and one config builds it
+  for Linux and for Windows; `make hello` writes `hello.exe` on Windows
+  ([#1](https://github.com/ushineko/fynstall/issues/1)).
 
 - Windows desktop integration, per-user (spec 001 phase 7b): the keys that
   make a launcher entry, an icon and a link on Linux make a Start Menu

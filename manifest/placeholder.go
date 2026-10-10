@@ -10,7 +10,7 @@ import (
 // Placeholders are the names a path template may use. Each resolves per OS
 // and scope at install time (package platform), except id, name and
 // version, which come from the app.
-var Placeholders = []string{"id", "name", "version", "home", "data", "config", "bin"}
+var Placeholders = []string{"id", "name", "version", "home", "data", "config", "bin", "programs"}
 
 // BuildPlaceholders are the names a payload src or dst, a link or a desktop
 // exec may use. They resolve per target when the installer is built, so one

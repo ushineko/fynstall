@@ -196,7 +196,7 @@ func newHome(t *testing.T, id string) home {
 	t.Helper()
 	require.NoError(t, setupFail)
 	d := t.TempDir()
-	return home{dir: d, root: filepath.Join(d, "AppData", "Local", id), tmp: t.TempDir(), path: t.TempDir(), reg: regtest.Root(t)}
+	return home{dir: d, root: filepath.Join(d, "AppData", "Local", "Programs", id), tmp: t.TempDir(), path: t.TempDir(), reg: regtest.Root(t)}
 }
 
 func greetHome(t *testing.T) home { return newHome(t, "io.ushineko.greet") }
@@ -505,6 +505,11 @@ func TestAnInstallIsInTheStartMenuInSettingsAndOnPath(t *testing.T) {
 	b, err := os.ReadFile(icon)
 	require.NoError(t, err)
 	require.Equal(t, []byte{0, 0, 1, 0, 5, 0}, b[:6], "an icon file with five sizes")
+	// Explorer shows the same icon for the installer and the uninstaller:
+	// each carries the images as resources.
+	for _, p := range []string{shell.Installer, shell.Uninstaller, h.uninstaller()} {
+		builder.RequireIcon(t, b, builder.ReadResources(t, p))
+	}
 	uninstall := `"` + h.uninstaller() + `"`
 	for name, want := range map[string]string{
 		"DisplayName": "Shell Example", "DisplayVersion": "1.2.3", "Publisher": "Example Makers",

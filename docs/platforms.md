@@ -10,7 +10,8 @@ spec 001 phase 7; the Windows section says what is there. macOS is later.
 
 | | Per-user | System |
 |---|---|---|
-| Install directory | `{data}/{id}` | `/opt/{id}` |
+| Install directory | `{programs}/{id}` | `{programs}/{id}` |
+| `{programs}` | the same as `{data}` | `/opt` |
 | `{data}` | `$XDG_DATA_HOME`, else `~/.local/share` | `/usr/local/share` |
 | `{config}` | `$XDG_CONFIG_HOME`, else `~/.config` | `/etc` |
 | `{bin}` | `~/.local/bin` | `/usr/local/bin` |
@@ -66,7 +67,8 @@ phase 7.
 
 | | Per-user |
 |---|---|
-| Install directory | `{data}\{id}` |
+| Install directory | `{programs}\{id}` |
+| `{programs}` | `{data}\Programs` |
 | `{home}` | `%USERPROFILE%` |
 | `{data}` | `%LOCALAPPDATA%`, else `%USERPROFILE%\AppData\Local` |
 | `{config}` | `%APPDATA%`, else `%USERPROFILE%\AppData\Roaming` |
@@ -86,7 +88,6 @@ of `LOCALAPPDATA` or `APPDATA` is ignored.
 Windows has no directory of links, so there is no `{bin}`. A template that
 names `{bin}` fails with "no value for {bin}".
 
-
 A full installer, with the wizard, does not build for a Windows target yet.
 `fynstall build --cli-only --target windows/amd64` builds from Linux and
 from Windows, with no C compiler.
@@ -105,7 +106,9 @@ Windows expects for each.
   shortcut and are not used.
 - **`app.icon`** becomes one `.ico` file with the sizes 16, 32, 48, 64 and
   256, made when the installer is built. The shortcut and Settings > Apps
-  show it. The installer's own `.exe` does not carry it yet.
+  show it. The installer and the uninstaller carry the same images as a
+  resource, so Explorer shows the icon for the `.exe` files too. The build
+  writes the resource itself, on Linux as on Windows, with no other tool.
 - **`integration.path_links`** puts the directory of each named program on
   the user's `PATH`. Windows finds a program by its file name, so there is
   no link. A console that is opened after the install has the new `PATH`.

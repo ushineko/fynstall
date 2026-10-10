@@ -94,7 +94,7 @@ build: ## Build the fynstall builder into bin/
 # graphics headers, as any Fyne window does.
 .PHONY: hello
 hello: ## Build examples/hello into examples/hello/bin/, where its fynstall.yaml looks
-	go build $(GOFLAGS) -o examples/hello/bin/hello ./examples/hello
+	go build $(GOFLAGS) -o examples/hello/bin/hello$(shell go env GOEXE) ./examples/hello
 
 # The multi-target example, for every target its fynstall.yaml can name.
 # Pure Go, so one machine builds them all.

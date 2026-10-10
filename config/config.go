@@ -276,7 +276,7 @@ const MinIconSize = 512
 var (
 	KnownScopes  = []string{"user", "system"}
 	KnownTargets = []string{"linux/amd64", "linux/arm64", "windows/amd64"}
-	DefaultDirs  = map[string]string{"user": "{data}/{id}", "system": "/opt/{id}"}
+	DefaultDirs  = map[string]string{"user": "{programs}/{id}", "system": "{programs}/{id}"}
 )
 
 // Error is one problem in a config, at a line when the line is known.

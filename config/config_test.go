@@ -37,8 +37,8 @@ func TestAValidConfigGetsDefaults(t *testing.T) {
 	c, err := Load(write(t, valid))
 	require.NoError(t, err)
 	require.Equal(t, []string{"user"}, c.Install.Scopes)
-	require.Equal(t, "{data}/{id}", c.Install.Dir["user"])
-	require.Equal(t, "/opt/{id}", c.Install.Dir["system"])
+	require.Equal(t, "{programs}/{id}", c.Install.Dir["user"])
+	require.Equal(t, "{programs}/{id}", c.Install.Dir["system"])
 }
 
 func TestEveryErrorHasItsLineAndField(t *testing.T) {

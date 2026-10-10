@@ -12,6 +12,7 @@ func TestUserVarsComeFromTheProfile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, `C:\Users\ada`, v["home"])
 	require.Equal(t, `D:\local`, v["data"])
+	require.Equal(t, `D:\local\Programs`, v["programs"])
 	require.Equal(t, `C:\Users\ada\AppData\Roaming`, v["config"], "a relative value is ignored")
 	require.Equal(t, `D:\local\fynstall\installs`, IndexDir(v))
 	require.False(t, System(v))
