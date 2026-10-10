@@ -24,5 +24,10 @@ func RunDir(scope string, env func(string) string) string {
 	if d := env("XDG_RUNTIME_DIR"); d != "" && filepath.IsAbs(d) {
 		return filepath.Join(d, "fynstall")
 	}
+	if os.Getuid() < 0 {
+		// Windows has no user IDs, and its temporary directory is already
+		// the user's own.
+		return filepath.Join(os.TempDir(), "fynstall")
+	}
 	return filepath.Join(os.TempDir(), fmt.Sprintf("fynstall-%d", os.Getuid()))
 }

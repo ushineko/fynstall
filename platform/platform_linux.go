@@ -6,6 +6,10 @@ import (
 	"path/filepath"
 )
 
+// HasDesktopIntegration is true: launcher entries and icons go under {data}
+// and links in {bin} (spec 001 R15).
+const HasDesktopIntegration = true
+
 func vars(scope string, env func(string) string) (map[string]string, error) {
 	switch scope {
 	case "user":

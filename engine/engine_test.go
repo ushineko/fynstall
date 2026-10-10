@@ -7,14 +7,17 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/ushineko/fynstall/internal/snapshot"
 	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/platform"
 )
 
 // fixture is a manifest and payload for io.example.hello, and a temp HOME
@@ -30,7 +33,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{home: t.TempDir(), payload: fstest.MapFS{}}
 	f.env = func(k string) string {
-		if k == "HOME" {
+		if k == "HOME" || k == "USERPROFILE" {
 			return f.home
 		}
 		return ""
@@ -52,7 +55,41 @@ func (f *fixture) add(path, content string, mode uint32) {
 	f.m.Files = append(f.m.Files, manifest.File{Path: path, Size: int64(len(content)), SHA256: hex.EncodeToString(sum[:]), Mode: mode})
 }
 
-func (f *fixture) root() string { return filepath.Join(f.home, ".local", "share", "io.example.hello") }
+// data and config are paths under {data} and {config}, wherever this OS
+// puts them in the home.
+func (f *fixture) data(elem ...string) string   { return f.under("data", elem) }
+func (f *fixture) config(elem ...string) string { return f.under("config", elem) }
+
+func (f *fixture) under(key string, elem []string) string {
+	v, err := platform.Vars("user", f.env)
+	if err != nil {
+		panic(err)
+	}
+	return filepath.Join(append([]string{v[key]}, elem...)...)
+}
+
+func (f *fixture) root() string { return f.data("io.example.hello") }
+
+// posixModes skips a check of permission bits where the OS keeps none.
+func posixModes() bool { return runtime.GOOS != "windows" }
+
+// needsLinks skips a test that makes symlinks where this process may not:
+// on Windows that takes a privilege most users do not have.
+func needsLinks(t *testing.T) {
+	t.Helper()
+	if err := os.Symlink("target", filepath.Join(t.TempDir(), "link")); err != nil {
+		t.Skipf("this process cannot make symlinks: %v", err)
+	}
+}
+
+// needsIntegration skips a test of launcher entries, icons and links in
+// {bin} on an OS whose backend does not make them.
+func needsIntegration(t *testing.T) {
+	t.Helper()
+	if !platform.HasDesktopIntegration {
+		t.Skip("this OS's backend makes no launcher entries or links yet")
+	}
+}
 
 func (f *fixture) snap(t *testing.T) map[string]string {
 	t.Helper()
@@ -79,8 +116,10 @@ func TestInstallThenUninstallLeavesTheHomeAsItWas(t *testing.T) {
 	require.Equal(t, "#!/bin/sh\necho hello\n", string(b))
 	fi, err := os.Stat(filepath.Join(f.root(), "bin", "hello"))
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o755), fi.Mode().Perm(), "the manifest's mode, since embed.FS keeps none")
-	_, err = os.Stat(filepath.Join(f.home, ".local", "share", "fynstall", "installs", "io.example.hello.json"))
+	if posixModes() {
+		require.Equal(t, os.FileMode(0o755), fi.Mode().Perm(), "the manifest's mode, since embed.FS keeps none")
+	}
+	_, err = os.Stat(f.data("fynstall", "installs", "io.example.hello.json"))
 	require.NoError(t, err, "the index entry")
 
 	rr, err := ReadReceipt(ReceiptPath(f.root()))
@@ -147,6 +186,7 @@ func TestASecondInstallIsRefusedWhileTheFirstIsIndexed(t *testing.T) {
 }
 
 func TestASymlinkInTheInstallDirectoryCannotCarryAWriteOutside(t *testing.T) {
+	needsLinks(t)
 	f := newFixture(t)
 	outside := t.TempDir()
 	require.NoError(t, os.MkdirAll(f.root(), 0o750))
@@ -184,6 +224,7 @@ func (f *fixture) withIntegration() {
 func (f *fixture) bin() string { return filepath.Join(f.home, ".local", "bin", "hello") }
 
 func TestIntegrationGoesUnderDataAndBinAndComesOutAgain(t *testing.T) {
+	needsIntegration(t)
 	f := newFixture(t)
 	f.withIntegration()
 	before := f.snap(t)
@@ -208,6 +249,8 @@ func TestIntegrationGoesUnderDataAndBinAndComesOutAgain(t *testing.T) {
 }
 
 func TestALinkPutsBackTheFileOrLinkItReplaced(t *testing.T) {
+	needsIntegration(t)
+	needsIntegration(t)
 	for name, prepare := range map[string]func(t *testing.T, path string){
 		"a file": func(t *testing.T, path string) {
 			require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\necho mine\n"), 0o700))
@@ -237,6 +280,7 @@ func TestALinkPutsBackTheFileOrLinkItReplaced(t *testing.T) {
 }
 
 func TestAnIconDirectoryLinkedOutsideDataIsRefused(t *testing.T) {
+	needsIntegration(t)
 	f := newFixture(t)
 	f.withIntegration()
 	share := filepath.Join(f.home, ".local", "share")
@@ -258,13 +302,18 @@ func TestAConfigFileIsRenderedFromParametersAndHoldsItsSecretPrivately(t *testin
 	r, err := Apply(context.Background(), p, f.payload, nil, nil)
 	require.NoError(t, err)
 
-	path := filepath.Join(f.home, ".config", "hello", "config.yml")
+	path := f.config("hello", "config.yml")
 	b, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Equal(t, "home: "+f.home+"\nserver: 'a: b # not a comment'\ntoken: s3cr3t\n", string(b), "sorted keys, quoted where YAML needs it")
+	var got map[string]string
+	require.NoError(t, yaml.Unmarshal(b, &got))
+	require.Equal(t, map[string]string{"home": f.home, "server": "a: b # not a comment", "token": "s3cr3t"}, got)
+	require.True(t, strings.HasSuffix(string(b), "\nserver: 'a: b # not a comment'\ntoken: s3cr3t\n"), "sorted keys, quoted where YAML needs it: %s", b)
 	fi, err := os.Stat(path)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), fi.Mode().Perm(), "it holds a secret")
+	if posixModes() {
+		require.Equal(t, os.FileMode(0o600), fi.Mode().Perm(), "it holds a secret")
+	}
 
 	require.Equal(t, map[string]string{"server": "a: b # not a comment"}, r.Parameters)
 	require.Equal(t, []string{"token"}, r.Secrets)
@@ -294,7 +343,7 @@ func TestAConfigFileInAKeptPathSurvivesTheUninstall(t *testing.T) {
 	require.NoError(t, err)
 	_, err = Uninstall(r, ReasonUninstall, nil)
 	require.NoError(t, err)
-	b, err := os.ReadFile(filepath.Join(f.home, ".config", "hello", "config.json"))
+	b, err := os.ReadFile(f.config("hello", "config.json"))
 	require.NoError(t, err)
 	require.Equal(t, "{\n  \"a\": \"b\"\n}\n", string(b))
 	_, err = os.Stat(f.root())
@@ -345,6 +394,9 @@ func write(t *testing.T, path, content string) {
 }
 
 func TestAPayloadLinkIsInstalledAsALinkAndRemoved(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a Windows payload has no links: the builder copies what they point at (spec 002 D4a)")
+	}
 	f := newFixture(t)
 	f.m.Symlinks = []manifest.Symlink{
 		{Path: "share/doc/README.txt", Target: "README"},
@@ -367,6 +419,9 @@ func TestAPayloadLinkIsInstalledAsALinkAndRemoved(t *testing.T) {
 }
 
 func TestAPayloadLinkPutsBackWhatWasAtItsPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a Windows payload has no links: the builder copies what they point at (spec 002 D4a)")
+	}
 	f := newFixture(t)
 	f.m.Symlinks = []manifest.Symlink{{Path: "share/a", Target: "doc"}, {Path: "share/b", Target: "doc/README"}}
 	write(t, filepath.Join(f.root(), "share", "a"), "a file was here")
@@ -382,7 +437,11 @@ func TestAPayloadLinkPutsBackWhatWasAtItsPath(t *testing.T) {
 }
 
 func TestAPayloadLinkThatLeavesTheInstallDirectoryIsRefused(t *testing.T) {
-	for _, target := range []string{"../../../../etc/passwd", "/etc/passwd"} {
+	absolute := "/etc/passwd"
+	if runtime.GOOS == "windows" {
+		absolute = `C:\Windows\win.ini`
+	}
+	for _, target := range []string{"../../../../etc/passwd", absolute} {
 		f := newFixture(t)
 		f.m.Symlinks = []manifest.Symlink{{Path: "share/x", Target: target}}
 		_, err := NewPlan(f.m, Options{Env: f.env})
@@ -394,6 +453,7 @@ func TestAPayloadLinkThatLeavesTheInstallDirectoryIsRefused(t *testing.T) {
 // the install. The patterns remove the cache and the link, never what the
 // link points at.
 func TestUninstallRemoveDeletesWhatItsPatternsMatchAndNothingElse(t *testing.T) {
+	needsLinks(t)
 	f := newFixture(t)
 	f.m.UninstallRemove = []string{"share/**/__pycache__", "bin/*.log"}
 	before := f.snap(t)
@@ -415,6 +475,7 @@ func TestUninstallRemoveDeletesWhatItsPatternsMatchAndNothingElse(t *testing.T) 
 }
 
 func TestLeftoversAreListedNotDeletedUntilAskedFor(t *testing.T) {
+	needsLinks(t)
 	f := newFixture(t)
 	before := f.snap(t)
 	_, err := f.install(t)
@@ -495,8 +556,8 @@ func TestTheLockRefusesASecondHolderUntilReleased(t *testing.T) {
 func TestAMigrateWhoseTwoEndsExistIsRefused(t *testing.T) {
 	f := newFixture(t)
 	f.m.Actions = []manifest.Action{{Migrate: &manifest.Migrate{From: "{data}/old", To: "{config}/hello/data"}}}
-	write(t, filepath.Join(f.home, ".local", "share", "old", "a"), "a")
-	write(t, filepath.Join(f.home, ".config", "hello", "data", "b"), "b")
+	write(t, f.data("old", "a"), "a")
+	write(t, f.config("hello", "data", "b"), "b")
 	_, err := NewPlan(f.m, Options{Env: f.env})
 	require.ErrorContains(t, err, "both")
 }
@@ -504,6 +565,9 @@ func TestAMigrateWhoseTwoEndsExistIsRefused(t *testing.T) {
 // A run action that fails carries its last output lines, and the install
 // it was part of is undone, its own undo included.
 func TestAFailingRunCarriesItsOutputAndIsUndone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the program it runs is a shell script")
+	}
 	f := newFixture(t)
 	marker := filepath.Join(f.home, "undone")
 	f.add("bin/setup", "#!/bin/sh\nif [ \"$1\" = undo ]; then : > \""+marker+"\"; exit 0; fi\necho one; echo two >&2; exit 3\n", 0o755)

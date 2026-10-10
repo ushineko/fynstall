@@ -147,7 +147,7 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 			return nil, fmt.Errorf("create directory: %w", err)
 		}
 		j.add(Entry{Op: OpMkdir, Path: d})
-		report.emit(Detail, "%s/", d)
+		report.emit(Detail, "%s%c", d, filepath.Separator)
 	}
 
 	report.step(steps, StepFiles)
@@ -356,7 +356,7 @@ func (j *journal) undoFiles(keep []string) error {
 		var err error
 		switch e.Op {
 		case OpCreate:
-			err = os.Remove(e.Path)
+			err = removeCreated(e.Path)
 			if errors.Is(err, fs.ErrNotExist) {
 				err = nil
 			}

@@ -228,7 +228,7 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 		size += pf.Size
 	}
 	_, _ = fmt.Fprintf(e.Out, "Copied %s files (%s).\n", thousands(len(plan.Files)), humanSize(size))
-	_, _ = fmt.Fprintf(e.Out, "Installed %s %s in %s.\nTo remove it, run %s/%s.\n", m.App.Name, m.App.Version, plan.Root, plan.Root, engine.UninstallName)
+	_, _ = fmt.Fprintf(e.Out, "Installed %s %s in %s.\nTo remove it, run %s.\n", m.App.Name, m.App.Version, plan.Root, filepath.Join(plan.Root, engine.UninstallName))
 	if len(plan.Links) > 0 {
 		if bin := filepath.Dir(plan.Links[0].Dst); !onPath(bin, e.Getenv("PATH")) {
 			_, _ = fmt.Fprintf(e.Out, "%s is not on your PATH, so the links in it are not found by name. Add it to PATH to run them that way.\n", bin)
@@ -275,6 +275,10 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 	for _, r := range replaced {
 		_, _ = fmt.Fprintf(e.Out, "  replaces %s (the uninstaller puts it back)\n", r)
 	}
+	if m := p.Manifest; !platform.HasDesktopIntegration && len(m.Desktop)+len(m.Links)+len(m.Icons) > 0 {
+		// A part of the config that does nothing here says so (spec 002).
+		_, _ = fmt.Fprintln(e.Out, "  launcher entries, icons and links on PATH are not applied on this platform yet")
+	}
 	// Actions are always shown: a run action runs a payload program.
 	for _, a := range actionLines(p) {
 		_, _ = fmt.Fprintf(e.Out, "  %s\n", a)
@@ -283,7 +287,7 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 		return
 	}
 	for _, d := range p.Dirs {
-		_, _ = fmt.Fprintf(e.Out, "  create   %s/\n", d)
+		_, _ = fmt.Fprintf(e.Out, "  create   %s%c\n", d, filepath.Separator)
 	}
 	for _, f := range p.Files {
 		verb := "create  "

@@ -1,0 +1,3 @@
+# gofmt and the linter read a CRLF file as unformatted, so Go sources are LF
+# in every checkout, whatever core.autocrlf says.
+*.go text eol=lf

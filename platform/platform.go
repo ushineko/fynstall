@@ -5,6 +5,7 @@ and an install scope, and says where the install index lives.
 package platform
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 )
@@ -51,6 +52,11 @@ func absOr(env func(string) string, key, def string) string {
 	}
 	return def
 }
+
+// ErrScopeUnavailable is wrapped by Vars for a scope this OS's backend does
+// not have yet. Nothing is installed in such a scope, so a search for an
+// install treats it as empty.
+var ErrScopeUnavailable = errors.New("this scope is not available on this platform yet")
 
 func unsupportedScope(scope string) error {
 	return fmt.Errorf("scope %q is not supported", scope)

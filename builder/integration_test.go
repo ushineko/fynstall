@@ -1,3 +1,5 @@
+//go:build linux
+
 package builder_test
 
 /*
@@ -16,6 +18,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"debug/elf"
+	"debug/pe"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -41,17 +44,18 @@ const (
 )
 
 var (
-	full       builder.Artifact // examples/hello with the wizard
-	fullCLI    builder.Artifact // the CLI variant from the same build
-	greetAMD64 builder.Artifact
-	greetARM64 builder.Artifact
-	beacon     builder.Artifact // examples/beacon: actions
-	src        string           // the staged copy of examples/hello: config, README, bin/hello
-	v1Art      builder.Artifact
-	v1Again    builder.Artifact
-	v2Art      builder.Artifact
-	hello020   builder.Artifact // app version 0.2.0, without the README: an upgrade
-	setupFail  error
+	full         builder.Artifact // examples/hello with the wizard
+	fullCLI      builder.Artifact // the CLI variant from the same build
+	greetAMD64   builder.Artifact
+	greetARM64   builder.Artifact
+	greetWindows builder.Artifact // cross-built; run by the tests on Windows
+	beacon       builder.Artifact // examples/beacon: actions
+	src          string           // the staged copy of examples/hello: config, README, bin/hello
+	v1Art        builder.Artifact
+	v1Again      builder.Artifact
+	v2Art        builder.Artifact
+	hello020     builder.Artifact // app version 0.2.0, without the README: an upgrade
+	setupFail    error
 )
 
 func TestMain(m *testing.M) {
@@ -198,8 +202,8 @@ func setupBeacon(repo, work string) error {
 	return nil
 }
 
-// setupGreet builds examples/greet for linux/amd64 and linux/arm64, pure Go
-// with no cgo, and one installer per target from the same config.
+// setupGreet builds examples/greet for each of its targets, pure Go with no
+// cgo, and one installer per target from the same config.
 func setupGreet(repo, work string) error {
 	dir := filepath.Join(work, "greet")
 	for _, f := range []string{"fynstall.yaml", "notes/arm64.txt"} {
@@ -215,13 +219,18 @@ func setupGreet(repo, work string) error {
 			return err
 		}
 	}
-	for _, arch := range []string{"amd64", "arm64"} {
+	for _, target := range []string{"linux/amd64", "linux/arm64", "windows/amd64"} {
+		goos, arch, _ := strings.Cut(target, "/")
+		name := "greet"
+		if goos == "windows" {
+			name += ".exe"
+		}
 		cmd := exec.CommandContext(context.Background(), "go", "build", "-trimpath",
-			"-o", filepath.Join(dir, "build", "linux-"+arch, "greet"), "./examples/greet")
+			"-o", filepath.Join(dir, "build", goos+"-"+arch, name), "./examples/greet")
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+goos, "GOARCH="+arch)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("build greet for %s: %w\n%s", arch, err, out)
+			return fmt.Errorf("build greet for %s: %w\n%s", target, err, out)
 		}
 	}
 	arts, err := builder.Build(context.Background(), builder.Options{
@@ -231,10 +240,10 @@ func setupGreet(repo, work string) error {
 	if err != nil {
 		return err
 	}
-	if len(arts) != 2 {
-		return fmt.Errorf("greet: %d artifacts, want 2", len(arts))
+	if len(arts) != 3 {
+		return fmt.Errorf("greet: %d artifacts, want 3", len(arts))
 	}
-	greetAMD64, greetARM64 = arts[0], arts[1]
+	greetAMD64, greetARM64, greetWindows = arts[0], arts[1], arts[2]
 	return nil
 }
 
@@ -470,6 +479,13 @@ func TestOneConfigInstallsEachTargetsOwnPayload(t *testing.T) {
 	require.NoError(t, setupFail)
 	require.Equal(t, "linux/amd64", greetAMD64.Target)
 	require.Equal(t, "linux/arm64", greetARM64.Target)
+	require.Equal(t, "windows/amd64", greetWindows.Target)
+	require.True(t, strings.HasSuffix(greetWindows.Installer, "-installer.exe"), greetWindows.Installer)
+	for _, p := range []string{greetWindows.Installer, greetWindows.Uninstaller} {
+		f, err := pe.Open(p)
+		require.NoError(t, err, "a Windows target builds a Windows program from Linux")
+		require.NoError(t, f.Close())
+	}
 	if runtime.GOARCH != "amd64" {
 		t.Skip("the amd64 half runs natively on amd64 only")
 	}
