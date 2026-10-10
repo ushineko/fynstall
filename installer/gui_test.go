@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"fyne.io/fyne/v2/widget"
 	"github.com/stretchr/testify/require"
@@ -168,7 +169,8 @@ func TestTheUninstallerAsksOnceThenRemoves(t *testing.T) {
 			r, err := engine.Apply(context.Background(), plan, p.Files, p.Uninstaller, nil)
 			require.NoError(t, err)
 
-			o := uninstallConfirm(r, skip, e.Getenv)
+			o, done := uninstallConfirm(r, skip, e.Getenv)
+			defer done()
 			require.Equal(t, "Uninstall Hello 0.1.0?", o.Question)
 			c := wizard.HeadlessConfirm(fynetest.App(t), o)
 			if !skip {
@@ -200,7 +202,9 @@ func TestTheUninstallWindowOffersToRemoveTheLeftovers(t *testing.T) {
 			made := filepath.Join(r.Root, "state.db")
 			require.NoError(t, os.WriteFile(made, []byte("the program's"), 0o600))
 
-			c := wizard.HeadlessConfirm(fynetest.App(t), uninstallConfirm(r, false, e.Getenv))
+			o, done := uninstallConfirm(r, false, e.Getenv)
+			defer done()
+			c := wizard.HeadlessConfirm(fynetest.App(t), o)
 			c.Act()
 			require.Equal(t, "Hello left 1 file it made.", c.Question())
 			require.Equal(t, "Hello 0.1.0 was removed.", c.Message())
@@ -229,4 +233,95 @@ func TestLeftoversDetailListsAtMostFiftyByName(t *testing.T) {
 	require.Contains(t, d, "`/x/f49`")
 	require.NotContains(t, d, "`/x/f50`")
 	require.Contains(t, d, "- and 10 more")
+}
+
+// With both scopes on offer, the wizard asks who the install is for, and
+// each choice has its own location page and default (spec 001 phase 5).
+func TestTheWizardAsksWhoTheInstallIsFor(t *testing.T) {
+	m, p, e, _ := guiFixture(t)
+	m.Parameters, m.ConfigFiles, m.Licence = nil, nil, ""
+	m.Scopes = []string{"user", "system"}
+	m.Dirs["system"] = "/opt/{id}"
+	g, err := newInstallWizard(m, p, installFlags{scope: "user"}, e)
+	require.NoError(t, err)
+	w := wizard.Headless(fynetest.App(t), g.options)
+	w.Next() // Welcome
+	require.Equal(t, "Install for", w.Current().Title())
+	radio := fynetest.All[*widget.RadioGroup](w.Content())
+	require.Len(t, radio, 1)
+	require.Equal(t, ForMe, radio[0].Selected, "the first scope is the default")
+
+	w.Next()
+	require.Equal(t, "Location", w.Current().Title())
+	require.Equal(t, g.dirs["user"].DirectoryPage, w.Current().(*scopedDir).DirectoryPage)
+	require.Contains(t, g.dirs["user"].Value(), ".local/share/io.example.hello")
+	w.Back()
+	radio[0].SetSelected(ForEveryone)
+	w.Next()
+	require.Equal(t, "/opt/io.example.hello", w.Current().(*scopedDir).Value(), "the system page, with its own default")
+	w.Next()
+	require.Equal(t, "Ready", w.Current().Title())
+	require.Equal(t, "system", g.plan.Scope)
+	require.Contains(t, g.welcome(), "asks for an administrator once")
+}
+
+// The uninstall window of a system install keeps its helper waiting while
+// it asks about the leftovers, and believes a removal only when the helper
+// confirms it. A desk check found the window closing the helper's input
+// when the first job returned, and then reporting a removal that never
+// happened.
+func TestTheUninstallWindowKeepsItsHelperForTheAnswer(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("as root there is no helper")
+	}
+	dir := t.TempDir()
+	pass := filepath.Join(dir, "elevate")
+	require.NoError(t, os.WriteFile(pass, []byte("#!/bin/sh\nexec \"$@\"\n"), 0o700)) // #nosec G306 -- a test program
+	helperFor := func(confirms bool) string {
+		ack := ""
+		if confirms {
+			ack = `if [ "$answer" = remove-leftovers ]; then echo '{"kind":"removed","step":0}'; fi` + "\n"
+		}
+		p := filepath.Join(dir, fmt.Sprintf("helper-%v", confirms))
+		script := "#!/bin/sh\necho '{\"kind\":\"leftovers\",\"step\":0,\"leftovers\":[{\"Path\":\"/opt/x/state.db\"}]}'\n" +
+			"read answer\n" + ack + "echo '{\"kind\":\"done\",\"step\":0}'\n"
+		require.NoError(t, os.WriteFile(p, []byte(script), 0o700)) // #nosec G306 -- a test program
+		return p
+	}
+	orig := helperProgram
+	t.Cleanup(func() { helperProgram = orig })
+	r := &engine.Receipt{App: manifest.App{ID: "io.example.hello", Name: "Hello", Version: "0.1.0"}, Scope: "system", Root: "/opt/x"}
+	env := func(k string) string { return map[string]string{"FYNSTALL_ELEVATE": pass}[k] }
+
+	for _, c := range []struct {
+		name     string
+		confirms bool
+		remove   bool
+		want     string
+	}{
+		{"removed", true, true, "Hello 0.1.0 was removed, with the files it made."},
+		{"kept", true, false, ""},
+		{"a helper that does not confirm", false, true, "Failed: the files the program made were not removed"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			helper := helperFor(c.confirms)
+			helperProgram = func() (string, error) { return helper, nil }
+			o, done := uninstallConfirm(r, false, env)
+			w := wizard.HeadlessConfirm(fynetest.App(t), o)
+			w.Act()
+			require.Equal(t, "Hello left 1 file it made.", w.Question())
+			// A person takes a moment to answer. A helper whose input were
+			// tied to the finished job would have seen it close by now.
+			time.Sleep(200 * time.Millisecond)
+			if !c.remove {
+				w.Cancel() // Keep them
+				done()
+				require.Equal(t, wizard.Finished, w.Result().Outcome)
+				return
+			}
+			w.Act()
+			done()
+			require.Contains(t, w.Message(), c.want)
+		})
+	}
 }

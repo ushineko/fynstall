@@ -9,7 +9,6 @@ package builder
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -69,9 +68,6 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 	c, err := config.Load(o.Config)
 	if err != nil {
 		return nil, err
-	}
-	if slices.Contains(c.Install.Scopes, "system") {
-		return nil, errors.New("install.scopes: system scope arrives in spec 001 phase 5")
 	}
 	if o.RuntimeVersion == "" {
 		o.RuntimeVersion = version.Version

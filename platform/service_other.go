@@ -22,19 +22,19 @@ func UnitPath(v map[string]string, name string) string {
 func HasServiceManager() bool { return false }
 
 // ServiceState reports nothing: no OS but Linux has service actions yet.
-func ServiceState(string) (enabled, active bool) { return false, false }
+func ServiceState(bool, string) (enabled, active bool) { return false, false }
 
 // ReloadServices fails: no OS but Linux has service actions yet.
-func ReloadServices() error { return errNoServices() }
+func ReloadServices(bool) error { return errNoServices() }
 
 // EnableService fails: no OS but Linux has service actions yet.
-func EnableService(string) error { return errNoServices() }
+func EnableService(bool, string) error { return errNoServices() }
 
 // RestartService fails: no OS but Linux has service actions yet.
-func RestartService(string) error { return errNoServices() }
+func RestartService(bool, string) error { return errNoServices() }
 
 // StartService fails: no OS but Linux has service actions yet.
-func StartService(string) error { return errNoServices() }
+func StartService(bool, string) error { return errNoServices() }
 
 // DisableService fails: no OS but Linux has service actions yet.
-func DisableService(string) error { return errNoServices() }
+func DisableService(bool, string) error { return errNoServices() }

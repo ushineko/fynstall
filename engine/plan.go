@@ -139,6 +139,7 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 		if root, err = manifest.Expand(m.Dirs[o.Scope], vars); err != nil {
 			return nil, fmt.Errorf("install directory: %w", err)
 		}
+		root = platform.Rooted(vars, root)
 	}
 	if !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("install directory %q is not an absolute path", root)
@@ -217,7 +218,7 @@ func DefaultRoot(m *manifest.Manifest, scope string, env func(string) string) (s
 	if err != nil {
 		return "", fmt.Errorf("install directory: %w", err)
 	}
-	return root, nil
+	return platform.Rooted(vars, root), nil
 }
 
 // Vars are the placeholder values for m in scope: the platform's locations

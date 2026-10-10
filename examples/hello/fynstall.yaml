@@ -9,9 +9,12 @@ app:
   licence: LICENSE
 
 install:
-  scopes: [user]
+  # The first is the default. System scope installs for everyone on the
+  # computer, under /opt, and asks for an administrator once.
+  scopes: [user, system]
   dir:
     user: "{data}/{id}"
+    system: "/opt/{id}"
 
 payload:
   - src: bin/hello

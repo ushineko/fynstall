@@ -32,6 +32,8 @@ type PlannedService struct {
 	Unit    string
 	Content []byte
 	Start   bool
+	// System is true for a system service.
+	System bool
 	// Exists is true when a unit file is already at Unit. Apply saves it,
 	// and the uninstaller puts it back with its enabled and running state.
 	Exists bool
@@ -68,6 +70,8 @@ type Hook struct {
 // ServiceEntry is what an OpService entry needs to put a service back.
 type ServiceEntry struct {
 	Name string `json:"name"`
+	// System is true for a system service; false is the user's manager.
+	System bool `json:"system,omitempty"`
 	// WasEnabled and WasActive are the state of a service of the same
 	// name that was there before the install.
 	WasEnabled bool `json:"was_enabled,omitempty"`
@@ -148,10 +152,11 @@ func (p *Plan) addService(s *manifest.Service, vars map[string]string, expandAll
 	if desc == "" {
 		desc = p.Manifest.App.Name
 	}
+	system := platform.System(vars)
 	ps := &PlannedService{
-		Name: s.Name, Unit: platform.UnitPath(vars, s.Name), Start: s.Start,
+		Name: s.Name, Unit: platform.UnitPath(vars, s.Name), Start: s.Start, System: system,
 		Content: platform.RenderUnit(platform.Unit{
-			AppID: p.Manifest.App.ID, Description: desc, Exec: p.inRoot(s.Exec), Args: args, Restart: s.Restart,
+			AppID: p.Manifest.App.ID, Description: desc, Exec: p.inRoot(s.Exec), Args: args, Restart: s.Restart, System: system,
 		}),
 	}
 	if ps.Exists, err = p.check(ps.Unit, vars["config"]); err != nil {
@@ -215,9 +220,9 @@ func (j *journal) apply(ctx context.Context, a PlannedAction) error {
 }
 
 func (j *journal) service(s *PlannedService) error {
-	e := Entry{Op: OpService, Path: s.Unit, Service: &ServiceEntry{Name: s.Name}}
+	e := Entry{Op: OpService, Path: s.Unit, Service: &ServiceEntry{Name: s.Name, System: s.System}}
 	if s.Exists {
-		e.Service.WasEnabled, e.Service.WasActive = platform.ServiceState(s.Name)
+		e.Service.WasEnabled, e.Service.WasActive = platform.ServiceState(s.System, s.Name)
 		if err := j.save(s.Unit, &e); err != nil {
 			return fmt.Errorf("back up %s: %w", s.Unit, err)
 		}
@@ -227,14 +232,14 @@ func (j *journal) service(s *PlannedService) error {
 	}
 	j.add(e)
 	j.report.emit(Detail, "service %s (%s)", s.Name, s.Unit)
-	if err := platform.ReloadServices(); err != nil {
+	if err := platform.ReloadServices(s.System); err != nil {
 		return err
 	}
-	if err := platform.EnableService(s.Name); err != nil {
+	if err := platform.EnableService(s.System, s.Name); err != nil {
 		return err
 	}
 	if s.Start {
-		return platform.RestartService(s.Name)
+		return platform.RestartService(s.System, s.Name)
 	}
 	return nil
 }
@@ -247,7 +252,7 @@ func (j *journal) undoAction(e Entry) error {
 	switch e.Op {
 	case OpService:
 		s := e.Service
-		if err := platform.DisableService(s.Name); err != nil {
+		if err := platform.DisableService(s.System, s.Name); err != nil {
 			j.report.emit(Warn, "%v", err)
 		}
 		var err error
@@ -260,16 +265,16 @@ func (j *journal) undoAction(e Entry) error {
 			return err
 		}
 		j.report.emit(Detail, "removed service %s", s.Name)
-		if err := platform.ReloadServices(); err != nil {
+		if err := platform.ReloadServices(s.System); err != nil {
 			j.report.emit(Warn, "%v", err)
 		}
 		if s.WasEnabled {
-			if err := platform.EnableService(s.Name); err != nil {
+			if err := platform.EnableService(s.System, s.Name); err != nil {
 				j.report.emit(Warn, "%v", err)
 			}
 		}
 		if s.WasActive {
-			if err := platform.StartService(s.Name); err != nil {
+			if err := platform.StartService(s.System, s.Name); err != nil {
 				j.report.emit(Warn, "%v", err)
 			}
 		}

@@ -56,7 +56,9 @@ over to that same installed file.
 Until fynstall has a release, build against a checkout:
 `fynstall build --runtime-path <path to fynstall>`.
 
-The config format is in [docs/config.md](docs/config.md).
+The config format is in [docs/config.md](docs/config.md), and what an install
+does on each platform, with the paths and elevation, in
+[docs/platforms.md](docs/platforms.md).
 
 ## What it will do
 
@@ -104,6 +106,17 @@ MIT. See [LICENSE](LICENSE).
 ## Changelog
 
 ### Unreleased
+
+- System scope on Linux (spec 001 phase 5, spec 002 phase 4b): an install
+  for everyone on the computer goes in `/opt/<id>`, with launcher entries
+  and icons under `/usr/local/share` and links in `/usr/local/bin`. Only
+  the changes run as root, in a helper the installer starts under `pkexec`
+  or `sudo`; the helper makes the plan again and refuses one that is not
+  what the person approved. The uninstaller elevates the same way, once. A
+  service in a system install is a system unit. The wizard asks who the
+  install is for when the config offers both scopes
+  ([#1](https://github.com/ushineko/fynstall/issues/1),
+  [#6](https://github.com/ushineko/fynstall/issues/6)).
 
 - Actions (spec 002 phase 4a): `service` runs a payload program as a
   systemd user unit, and the uninstaller stops and removes it and puts back

@@ -6,6 +6,10 @@ app:
   version: 0.1.0
   publisher: ushineko
 
+install:
+  # Per user, a systemd user unit; for everyone, a system unit.
+  scopes: [user, system]
+
 payload:
   - src: bin/beacon
     dst: bin/beacon

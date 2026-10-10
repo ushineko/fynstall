@@ -58,8 +58,13 @@ The output files take their name from the last segment of the ID:
 | `dir.user` | `{data}/{id}` | Where a per-user install goes. |
 | `dir.system` | `/opt/{id}` | Where a system-wide install goes. |
 
-A per-user install needs no elevation. System scope is not available yet;
-spec 001 phase 5 adds it.
+A per-user install needs no elevation. A system install is for everyone
+on the computer. The installer and the uninstaller stay the person's own
+programs and ask for an administrator once, through `pkexec` in the window
+and `sudo` on the command line; only the changes run as root. When both
+scopes are offered, the wizard asks "Install for: Just me / Everyone on this
+computer", and the command line takes `--scope system`. A config that
+offers system scope cannot use `{home}`. See [platforms.md](platforms.md).
 
 The user can choose another directory when the installer asks, or with
 `--dir`.
@@ -365,13 +370,13 @@ target, and records the target in the installer's manifest.
 Path templates in `install.dir` and `keep_on_uninstall` can use these
 names. Each one is resolved on the machine that runs the installer.
 
-| Placeholder | Linux, per-user |
-|---|---|
-| `{id}`, `{name}`, `{version}` | From `app`. |
-| `{home}` | `$HOME` |
-| `{data}` | `$XDG_DATA_HOME`, else `~/.local/share` |
-| `{config}` | `$XDG_CONFIG_HOME`, else `~/.config` |
-| `{bin}` | `~/.local/bin` |
+| Placeholder | Linux, per-user | Linux, system |
+|---|---|---|
+| `{id}`, `{name}`, `{version}` | From `app`. | From `app`. |
+| `{home}` | `$HOME` | none: a validation error |
+| `{data}` | `$XDG_DATA_HOME`, else `~/.local/share` | `/usr/local/share` |
+| `{config}` | `$XDG_CONFIG_HOME`, else `~/.config` | `/etc` |
+| `{bin}` | `~/.local/bin` | `/usr/local/bin` |
 
 An unknown placeholder is a validation error. A relative `XDG_*` value is
 ignored, as the XDG base directory specification requires.
@@ -392,7 +397,8 @@ Outside it:
 - `{data}/applications/<id>.desktop` for each desktop entry.
 - `{data}/icons/hicolor/<size>x<size>/apps/<app id>.png` for each icon size.
 - `{bin}/<name>` for each link.
-- `{config}/systemd/user/<name>.service` for each service, on Linux.
+- `{config}/systemd/user/<name>.service` for each service, on Linux;
+  `/etc/systemd/system/<name>.service` for a system install.
 
 A file or link that is already at one of these paths is saved first. A
 link is saved as its target, so the uninstaller puts back a link and not a
