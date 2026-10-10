@@ -107,6 +107,14 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- Upgrade, repair and downgrade (spec 001 phase 6a, R17): an installer run
+  over an installed version replaces it through that version's own
+  uninstaller, keeps the parameters it was given (secrets read back from
+  its configuration file), and installs only the plan it showed. The wizard
+  opens on what it will do, with "Uninstall it instead". A downgrade asks
+  first, or needs `--downgrade` with `--yes`. A system upgrade asks for an
+  administrator once ([#1](https://github.com/ushineko/fynstall/issues/1)).
+
 - System scope on Linux (spec 001 phase 5, spec 002 phase 4b): an install
   for everyone on the computer goes in `/opt/<id>`, with launcher entries
   and icons under `/usr/local/share` and links in `/usr/local/bin`. Only

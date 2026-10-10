@@ -20,6 +20,17 @@ type Leftover struct {
 	Dir  bool
 }
 
+// Reason is why an uninstall runs. The programs it runs (uninstall hooks
+// and the undos of run actions) see it as FYNSTALL_UNINSTALL_REASON, so a
+// program can keep its registered state across an upgrade (spec 001 R17).
+type Reason string
+
+// The reasons an uninstall runs.
+const (
+	ReasonUninstall Reason = "uninstall"
+	ReasonUpgrade   Reason = "upgrade"
+)
+
 // Uninstall replays r's journal in reverse: it removes what the install
 // created and puts back what it replaced. Then it removes what r.Remove
 // matches, the receipt, and the directories the install created that are
@@ -31,11 +42,12 @@ type Leftover struct {
 //
 // It can be run again after a failure: a file already removed or restored
 // is skipped, and the receipt stays until every file is dealt with.
-func Uninstall(r *Receipt, report Reporter) ([]Leftover, error) {
-	j := &journal{root: r.Root, entries: r.Journal, report: report}
+func Uninstall(r *Receipt, why Reason, report Reporter) ([]Leftover, error) {
+	env := []string{"FYNSTALL_UNINSTALL_REASON=" + string(why)}
+	j := &journal{root: r.Root, entries: r.Journal, report: report, env: env}
 	if len(r.Hooks) > 0 {
 		report.emit(Step, "Running the uninstall hooks of %s", r.App.Name)
-		if err := runHooks(r.Hooks, report); err != nil {
+		if err := runHooks(r.Hooks, env, report); err != nil {
 			return nil, fmt.Errorf("uninstall %s: %w", r.App.Name, err)
 		}
 	}

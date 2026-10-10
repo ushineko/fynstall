@@ -507,19 +507,60 @@ and with the system paths under a temporary directory
 
 ### Phase 6: upgrade, repair, and a real consumer (R17)
 
-- [ ] Integration tests: install 0.1.0, then install 0.2.0, which drops one
+Two PRs: 6a is upgrade, repair and downgrade; 6b is the first consumer.
+
+Settled for 6a (2026-10-09):
+
+- The installer reads the old install's receipt and shows the plan it
+  predicts for after the old version is gone. It then runs the old
+  uninstaller, plans again, and installs only when the new plan has the
+  same content as the one shown.
+- The old uninstaller runs with `--upgrade` when its `-h` lists that flag,
+  else with `--quiet`, which removes the same files, so every uninstaller
+  ever installed stays usable.
+- The old version's uninstall hooks and `run` undos run during an upgrade
+  as on any uninstall, with `FYNSTALL_UNINSTALL_REASON` set to `upgrade`
+  or `uninstall` in their environment.
+- A system upgrade runs whole in one root helper, after one prompt. The
+  helper checks the predicted plan's digest before it removes anything.
+  A file that holds a secret is in the digest by path and mode only, so
+  the helper can read the old secret as root.
+- The wizard's first page says what an existing install becomes, and has
+  an "Uninstall instead" button that starts the installed uninstaller.
+- Locks: the installer lets go of its lock while the old uninstaller,
+  which takes the same lock, runs, and takes it again after.
+
+Phase 6a:
+
+- [x] Integration tests: install 0.1.0, then install 0.2.0, which drops one
       file. The new installer gathers the parameters (spec 002 D3a), stops
       the services, and runs the 0.1.0 uninstaller with `--upgrade` (R9e).
       The dropped file is removed, kept paths and parameter values survive,
       and the receipt is the 0.2.0 one. Repair restores a deleted file.
-      Downgrade asks for confirmation.
+      Downgrade asks for confirmation. (`TestAnUpgradeRemovesWhatTheOldVersionHadAndKeepsKeptData`,
+      `TestARepairPutsBackADeletedFile`, `TestADowngradeIsDoneOnlyWhenAskedFor`.)
+- [x] A secret parameter survives an upgrade, read back from the existing
+      config file; the person is not asked again.
+      (`TestASecretSurvivesAnUpgradeWithoutBeingAskedFor`.)
+- [x] An uninstaller without `--upgrade` is run with `--quiet`, and the
+      upgrade works. (`TestAnUninstallerWithoutUpgradeIsRunQuietly`.)
+- [x] Uninstall hooks see `FYNSTALL_UNINSTALL_REASON=upgrade` during an
+      upgrade. (`TestUninstallHooksAreToldWhyTheyRun`.)
+- [x] A system-scope upgrade runs in one helper (integration, with the
+      stand-in for `pkexec`). (`TestASystemUpgradeRunsInOneHelper`.)
+- [x] The wizard's first page for an installed app says upgrade, repair or
+      downgrade; downgrade waits for its confirmation check (headless).
+      (`TestTheWizardSaysWhatItDoesToAnInstalledVersion`.)
+- [x] Desk check: upgrade the installed Hello from Dolphin through the
+      wizard. The launcher entry stays, and the version in Hello's About
+      section changes.
+
+Phase 6b:
+
 - [ ] First consumer: a `fynstall.yaml` for clockwork-orange that produces the
       same files as its `install.sh` (two binaries, `.desktop`, seven icon
       sizes, the `--no-gui` equivalent as a component). The two results are
       compared with `diff` of file lists in two temp homes.
-- [ ] Desk check: upgrade the installed Hello from Dolphin through the
-      wizard. The launcher entry stays, and the version in Hello's About
-      section changes.
 
 ### Phase 7: Windows (R18, R19, R9f, registry restore in R9a/R9d)
 
@@ -671,6 +712,23 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 6a (2026-10-09)
+
+On CachyOS with KDE Plasma 6 on Wayland. `make test` (with `-race`),
+`make lint` (0 issues) and `govulncheck` (no vulnerabilities) pass.
+
+- From Dolphin, the Hello 0.1.0 installer installed it for the user, and
+  Hello's About section said 0.1.0. A double-click on the 0.2.0 installer
+  opened on "Upgrade" ("Upgrades Hello 0.1.0 to 0.2.0"), and installed.
+  Hello started from the same launcher entry, and About said 0.2.0. The
+  index then said 0.2.0; the uninstall removed the install, the link, the
+  launcher entry and the index.
+- Found on the way: the plan for an upgrade refused the old version's own
+  `~/.local/bin/hello` link as resolving outside `{bin}`. A path the old
+  uninstaller removes now has only its directory checked.
+- A test from phase 1 expected a second install to be refused; under R17
+  it is a repair through the installed uninstaller, and the test says so.
 
 ### Phase 5 (2026-10-09)
 

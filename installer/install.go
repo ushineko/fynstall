@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,9 +18,9 @@ import (
 )
 
 type installFlags struct {
-	cli, gui, yes, dryRun, uninstall, forceReceipt, verbose, version bool
-	dir, scope                                                       string
-	params                                                           map[string]string
+	cli, gui, yes, dryRun, uninstall, forceReceipt, verbose, version, downgrade bool
+	dir, scope                                                                  string
+	params                                                                      map[string]string
 }
 
 // Install runs the installer and returns its exit code.
@@ -41,6 +40,7 @@ func Install(args []string, p Payload, e Env) int {
 	fl.BoolVar(&f.forceReceipt, "force-receipt-uninstall", false, "remove the installed copy with this installer's engine, when its own uninstaller is missing or broken")
 	fl.BoolVar(&f.verbose, "verbose", false, "list every file and directory as it is written")
 	fl.BoolVar(&f.version, "version", false, "print the version and exit")
+	fl.BoolVar(&f.downgrade, "downgrade", false, "replace an installed newer version with this older one without asking")
 	fl.StringVar(&f.dir, "dir", "", "install directory (default from the installer)")
 	fl.StringVar(&f.scope, "scope", "", "install scope: user, or system for everyone on this computer")
 	applyPlanFile := fl.String("apply-plan", "", "used by the installer itself: apply the plan in this file as root")
@@ -80,26 +80,43 @@ func Install(args []string, p Payload, e Env) int {
 		return installGUI(m, p, f, e)
 	}
 
-	ix, ixPath, err := engine.ReadIndex(m, f.scope, e.Getenv)
+	ix, err := findExisting(m, f.scope, e.Getenv)
 	switch {
-	case err == nil && f.forceReceipt:
-		return forceUninstall(ix, e, f.verbose)
-	case err == nil && f.uninstall:
-		return delegate(ix, f.yes, e)
-	case err == nil:
-		_, _ = fmt.Fprintf(e.Err, "%s %s is already installed in %s.\nRemove it first with --uninstall, which runs %s.\n", m.App.Name, ix.Version, ix.Root, ix.Uninstaller)
-		return exitFail
-	case !errors.Is(err, fs.ErrNotExist):
+	case err != nil:
 		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
 		return exitFail
-	case f.uninstall || f.forceReceipt:
-		_, _ = fmt.Fprintf(e.Err, "%s is not installed for scope %s (no %s).\n", m.App.Name, f.scope, ixPath)
+	case ix != nil && f.forceReceipt:
+		return forceUninstall(ix, e, f.verbose)
+	case ix != nil && f.uninstall:
+		return delegate(ix, f.yes, e)
+	case ix == nil && (f.uninstall || f.forceReceipt):
+		_, _ = fmt.Fprintf(e.Err, "%s is not installed.\n", m.App.Name)
+		return exitFail
+	case ix == nil:
+		return install(m, p, f, e, nil)
+	}
+	// An upgrade, repair or downgrade (R17).
+	old, err := readExisting(ix)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
 		return exitFail
 	}
-	return install(m, p, f, e)
+	if f.dir != "" && filepath.Clean(f.dir) != ix.Root {
+		_, _ = fmt.Fprintf(e.Err, "%s %s is installed in %s, and a new version goes where it is. Leave out --dir, or uninstall it first with --uninstall.\n",
+			m.App.Name, ix.Version, ix.Root)
+		return exitUsage
+	}
+	if replacement(ix.Version, m.App.Version) == "downgrade" && !f.downgrade && (f.yes || !e.Interactive) {
+		_, _ = fmt.Fprintf(e.Err, "%s %s is installed, which is newer than %s. Pass --downgrade to replace it with this older version.\n",
+			m.App.Name, ix.Version, m.App.Version)
+		return exitUsage
+	}
+	f.scope, f.dir = old.receipt.Scope, ix.Root
+	return install(m, p, f, e, old)
 }
 
-func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
+// install installs m, replacing old when it is not nil.
+func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *installed) int {
 	if !f.yes && !f.dryRun && !e.Interactive {
 		_, _ = fmt.Fprintln(e.Err, "There is no terminal to ask questions on. Run with --yes to install with the defaults.")
 		return exitUsage
@@ -114,21 +131,34 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 	if !f.yes && !f.dryRun {
 		prompt = ask.parameter
 	}
-	params, err := resolveParams(m, f.params, side, prompt)
+	elevate := needsElevation(f.scope)
+	var previous map[string]string
+	var deferred []string
+	if old != nil {
+		// A secret the person's process cannot read (a system install's
+		// config file) is read by the helper, as root.
+		previous, deferred = engine.Previous(m, old.receipt, e.Getenv)
+		if !elevate {
+			deferred = nil
+		}
+	}
+	params, err := resolveParams(m, f.params, side, previous, deferred, prompt)
 	if err != nil {
 		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
 		return exitUsage
 	}
-	elevate := needsElevation(f.scope)
+	var l *lock
 	if !f.dryRun && !elevate {
-		unlock, err := engine.Lock(m.App.ID, f.scope, e.Getenv)
-		if err != nil {
+		if l, err = takeLock(m.App.ID, f.scope, e.Getenv); err != nil {
 			_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
 			return exitFail
 		}
-		defer unlock()
+		defer l.Release()
 	}
 	o := engine.Options{Scope: f.scope, Root: f.dir, Env: e.Getenv, Uninstaller: p.Uninstaller, Params: params}
+	if old != nil {
+		o.Replacing = old.receipt
+	}
 	plan, err := engine.NewPlan(m, o)
 	if err != nil {
 		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
@@ -149,9 +179,20 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 		}
 	}
 
+	if old != nil {
+		_, _ = fmt.Fprintf(e.Out, "%s: the uninstaller that came with %s removes it first, then this version installs.\n",
+			replacementText(m, old.receipt.App.Version), old.receipt.App.Version)
+	}
 	printPlan(e, plan, f.dryRun)
 	if f.dryRun {
 		return exitOK
+	}
+	if old != nil && replacement(old.receipt.App.Version, m.App.Version) == "downgrade" && !f.downgrade {
+		ok, err := ask.yes(fmt.Sprintf("Replace %s %s with the older %s?", m.App.Name, old.receipt.App.Version, m.App.Version))
+		if err != nil || !ok {
+			_, _ = fmt.Fprintln(e.Out, "Nothing was changed.")
+			return exitFail
+		}
 	}
 	if !f.yes {
 		ok, err := ask.yes("Install?")
@@ -167,6 +208,11 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 	if elevate {
 		_, _ = fmt.Fprintln(e.Out, "This install is for everyone on this computer, so it needs an administrator.")
 		if err := applyRequest(ctx, plan, false, e, report); err != nil {
+			_, _ = fmt.Fprintf(e.Err, "%v\n", err)
+			return exitFail
+		}
+	} else if old != nil {
+		if err := replace(ctx, plan, old, p, e.Getenv, l, report); err != nil {
 			_, _ = fmt.Fprintf(e.Err, "%v\n", err)
 			return exitFail
 		}
@@ -345,7 +391,7 @@ func forceUninstall(ix *engine.Index, e Env, verbose bool) int {
 	defer unlock()
 	_, _ = fmt.Fprintf(e.Out, "Removing %s %s with this installer's engine, not its own uninstaller.\n", r.App.Name, r.App.Version)
 	report := reporter(e, verbose)
-	left, err := engine.Uninstall(r, report)
+	left, err := engine.Uninstall(r, engine.ReasonUninstall, report)
 	if err != nil {
 		_, _ = fmt.Fprintf(e.Err, "%v\n", err)
 		return exitFail

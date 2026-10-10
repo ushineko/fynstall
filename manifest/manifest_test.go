@@ -85,3 +85,17 @@ func TestAPatternCannotReachOutsideTheInstallDirectory(t *testing.T) {
 		require.Contains(t, CheckPattern(p), want, p)
 	}
 }
+
+func TestVersionsCompareAsSemverSays(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want int
+	}{
+		{"0.2.0", "0.1.0", 1}, {"0.10.0", "0.9.0", 1}, {"1.0.0", "1.0.0", 0},
+		{"1.0.0-rc.1", "1.0.0", -1}, {"1.0.0-rc.2", "1.0.0-rc.10", -1}, {"1.0.0-alpha", "1.0.0-beta", -1},
+		{"1.0.0+build.5", "1.0.0", 0}, {"1.0.0-alpha.1", "1.0.0-alpha", 1},
+	} {
+		require.Equal(t, c.want, CompareVersions(c.a, c.b), "%s vs %s", c.a, c.b)
+		require.Equal(t, -c.want, CompareVersions(c.b, c.a), "%s vs %s", c.b, c.a)
+	}
+}

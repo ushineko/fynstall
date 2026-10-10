@@ -54,6 +54,9 @@ type Event struct {
 // The steps of an install, in order. Linking is there only when the
 // install makes links.
 const (
+	// StepReplace is the installed version's uninstaller removing it, in
+	// an upgrade, repair or downgrade. The front end runs it, before Apply.
+	StepReplace = "Removing the installed version"
 	StepDirs    = "Creating directories"
 	StepFiles   = "Copying files"
 	StepLinks   = "Linking"
@@ -63,20 +66,27 @@ const (
 
 // Steps names the steps Apply will report for p, so a front end can show
 // them before the install starts.
-func Steps(p *Plan) []string { return stepNames(len(p.Links) > 0, len(p.Actions) > 0) }
+func Steps(p *Plan) []string {
+	return stepNames(p.Replaces != "", len(p.Links) > 0, len(p.Actions) > 0)
+}
 
 // ManifestSteps is Steps before there is a plan: the steps depend only on
-// whether the manifest has links and actions other than uninstall hooks.
-func ManifestSteps(m *manifest.Manifest) []string {
+// whether an install is replaced, and whether the manifest has links and
+// actions other than uninstall hooks.
+func ManifestSteps(m *manifest.Manifest, replaces bool) []string {
 	actions := false
 	for _, a := range m.Actions {
 		actions = actions || a.Run == nil || !a.Run.Hook
 	}
-	return stepNames(len(m.Links) > 0, actions)
+	return stepNames(replaces, len(m.Links) > 0, actions)
 }
 
-func stepNames(links, actions bool) []string {
-	s := []string{StepDirs, StepFiles}
+func stepNames(replaces, links, actions bool) []string {
+	var s []string
+	if replaces {
+		s = append(s, StepReplace)
+	}
+	s = append(s, StepDirs, StepFiles)
 	if links {
 		s = append(s, StepLinks)
 	}
@@ -220,6 +230,8 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 
 // journal records changes as they are made and can undo them.
 type journal struct {
+	// env is added to the environment of the programs an undo runs.
+	env     []string
 	root    string
 	entries []Entry
 	report  Reporter

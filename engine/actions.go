@@ -203,7 +203,7 @@ func (j *journal) apply(ctx context.Context, a PlannedAction) error {
 			j.add(Entry{Op: OpRun, Path: r.Exec, Run: &RunEntry{Exec: r.Exec, Dir: r.Dir, Undo: r.Undo}})
 		}
 		j.report.emit(Detail, "run %s", strings.Join(append([]string{r.Exec}, r.Args...), " "))
-		return runProgram(ctx, r.Exec, r.Dir, r.Args, j.report)
+		return runProgram(ctx, r.Exec, r.Dir, r.Args, nil, j.report)
 	case a.Migrate != nil:
 		m := a.Migrate
 		if !m.Present {
@@ -281,7 +281,7 @@ func (j *journal) undoAction(e Entry) error {
 	case OpRun:
 		r := e.Run
 		j.report.emit(Detail, "run %s", strings.Join(append([]string{r.Exec}, r.Undo...), " "))
-		if err := runProgram(context.Background(), r.Exec, r.Dir, r.Undo, j.report); err != nil {
+		if err := runProgram(context.Background(), r.Exec, r.Dir, r.Undo, j.env, j.report); err != nil {
 			j.report.emit(Warn, "undo: %v", err)
 		}
 	case OpMigrate:
@@ -295,10 +295,10 @@ func (j *journal) undoAction(e Entry) error {
 
 // runHooks runs the uninstall hooks, before anything is removed. A
 // failure stops the uninstall unless the hook may fail.
-func runHooks(hooks []Hook, report Reporter) error {
+func runHooks(hooks []Hook, env []string, report Reporter) error {
 	for _, h := range hooks {
 		report.emit(Detail, "run %s", strings.Join(append([]string{h.Exec}, h.Args...), " "))
-		if err := runProgram(context.Background(), h.Exec, h.Dir, h.Args, report); err != nil {
+		if err := runProgram(context.Background(), h.Exec, h.Dir, h.Args, env, report); err != nil {
 			if !h.ContinueOnError {
 				return fmt.Errorf("uninstall hook: %w; nothing was removed", err)
 			}
@@ -312,11 +312,15 @@ func runHooks(hooks []Hook, report Reporter) error {
 // carries.
 const outputTail = 10
 
-// runProgram runs a payload program, never a shell, in dir. Each line of
-// its output is reported; a failure carries the last lines.
-func runProgram(ctx context.Context, path, dir string, args []string, report Reporter) error {
+// runProgram runs a payload program, never a shell, in dir, with env added
+// to this process's environment. Each line of its output is reported; a
+// failure carries the last lines.
+func runProgram(ctx context.Context, path, dir string, args, env []string, report Reporter) error {
 	cmd := exec.CommandContext(ctx, path, args...) // #nosec G204 -- a payload program the config declares, shown before it runs
 	cmd.Dir = dir
+	if env != nil {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	r, w := io.Pipe()
 	cmd.Stdout, cmd.Stderr = w, w
 	var tail []string

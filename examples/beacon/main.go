@@ -53,7 +53,7 @@ func run(args []string, out io.Writer) error {
 		if _, err := os.Stat("fail-goodbye"); err == nil {
 			return errors.New("goodbye failed: fail-goodbye is here")
 		}
-		_, _ = fmt.Fprintln(out, "beacon: the uninstall hook ran")
+		_, _ = fmt.Fprintf(out, "beacon: the uninstall hook ran (%s)\n", os.Getenv("FYNSTALL_UNINSTALL_REASON"))
 		return nil
 	}
 	return fmt.Errorf("unknown command %q", args[0])

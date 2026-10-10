@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -75,14 +76,25 @@ func readSideFile(dir string, m *manifest.Manifest) (map[string]string, error) {
 }
 
 // resolveParams gives every parameter a value, highest source first: a
-// flag, the side file, a person (when ask is not nil), the default. A
-// required parameter left empty is an error that names its flag.
-func resolveParams(m *manifest.Manifest, flags, side map[string]string, ask func(p manifest.Parameter) (string, error)) (map[string]string, error) {
+// flag, the side file, the value the installed version was given (an
+// upgrade, spec 002 D3a), a person (when ask is not nil), the default. A
+// required parameter left empty is an error that names its flag, unless it
+// is deferred: a secret the privileged helper reads back as root.
+func resolveParams(m *manifest.Manifest, flags, side, previous map[string]string, deferred []string,
+	ask func(p manifest.Parameter) (string, error),
+) (map[string]string, error) {
 	out := map[string]string{}
 	for _, p := range m.Parameters {
 		v, ok := flags[p.Name]
 		if !ok {
 			v, ok = side[p.Name]
+		}
+		if !ok {
+			v, ok = previous[p.Name]
+		}
+		if !ok && slices.Contains(deferred, p.Name) {
+			out[p.Name] = ""
+			continue
 		}
 		if !ok && ask != nil {
 			var err error

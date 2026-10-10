@@ -409,3 +409,24 @@ what the install created and puts back what it replaced. Then it removes
 what `uninstall.remove` matches, the receipt, and the directories the
 install created, if they are empty. It lists what the program left in the
 install directory; see [uninstall](#uninstall).
+
+## Upgrade, repair and downgrade
+
+Running an installer while its app is installed replaces the installed
+version: an upgrade when this one is newer, a repair when it is the same,
+and a downgrade when it is older. A downgrade asks first; with `--yes`, it
+needs `--downgrade`.
+
+1. The installer reads the installed version's record. The parameters it
+   was given are used again, so nobody is asked twice. A secret comes back
+   from the configuration file the installed version wrote, through the
+   same `config_file`.
+2. It shows the plan for after the installed version is gone, and asks.
+3. The installed version's own uninstaller removes it, with `--upgrade`
+   (an older uninstaller gets `--quiet`). Its uninstall hooks and the
+   undos of its `run` actions see `FYNSTALL_UNINSTALL_REASON=upgrade`.
+   Kept paths stay, and what the program left stays where it is.
+4. The installer plans again, checks the plan is the one it showed, and
+   installs in the same place and scope.
+
+A system install is replaced in one privileged helper, after one prompt.

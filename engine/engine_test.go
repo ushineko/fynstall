@@ -86,7 +86,7 @@ func TestInstallThenUninstallLeavesTheHomeAsItWas(t *testing.T) {
 	rr, err := ReadReceipt(ReceiptPath(f.root()))
 	require.NoError(t, err)
 	require.Equal(t, r.Journal, rr.Journal)
-	_, err = Uninstall(rr, nil)
+	_, err = Uninstall(rr, ReasonUninstall, nil)
 	require.NoError(t, err)
 	require.Equal(t, before, f.snap(t))
 }
@@ -104,7 +104,7 @@ func TestUninstallPutsBackAFileTheInstallReplaced(t *testing.T) {
 
 	r, err := ReadReceipt(ReceiptPath(f.root()))
 	require.NoError(t, err)
-	_, err = Uninstall(r, nil)
+	_, err = Uninstall(r, ReasonUninstall, nil)
 	require.NoError(t, err)
 	require.Equal(t, before, f.snap(t), "the original file, with its mode, and the directories that held it")
 }
@@ -162,7 +162,7 @@ func TestUninstallNeverTouchesAKeptPath(t *testing.T) {
 	require.NoError(t, err)
 	r, err := ReadReceipt(ReceiptPath(f.root()))
 	require.NoError(t, err)
-	_, err = Uninstall(r, nil)
+	_, err = Uninstall(r, ReasonUninstall, nil)
 	require.NoError(t, err)
 	_, err = os.Stat(filepath.Join(f.root(), "share", "doc", "README"))
 	require.NoError(t, err, "inside a kept path")
@@ -202,7 +202,7 @@ func TestIntegrationGoesUnderDataAndBinAndComesOutAgain(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(f.root(), "bin", "hello"), target)
 
-	_, err = Uninstall(r, nil)
+	_, err = Uninstall(r, ReasonUninstall, nil)
 	require.NoError(t, err)
 	require.Equal(t, before, f.snap(t))
 }
@@ -229,7 +229,7 @@ func TestALinkPutsBackTheFileOrLinkItReplaced(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, filepath.Join(f.root(), "bin", "hello"), target)
 
-			_, err = Uninstall(r, nil)
+			_, err = Uninstall(r, ReasonUninstall, nil)
 			require.NoError(t, err)
 			require.Equal(t, before, f.snap(t), "the same kind of thing, with the same content or target")
 		})
@@ -272,7 +272,7 @@ func TestAConfigFileIsRenderedFromParametersAndHoldsItsSecretPrivately(t *testin
 	require.NoError(t, err)
 	require.NotContains(t, string(rb), "s3cr3t")
 
-	_, err = Uninstall(r, nil)
+	_, err = Uninstall(r, ReasonUninstall, nil)
 	require.NoError(t, err)
 	require.Equal(t, before, f.snap(t))
 }
@@ -292,7 +292,7 @@ func TestAConfigFileInAKeptPathSurvivesTheUninstall(t *testing.T) {
 	require.NoError(t, err)
 	r, err := Apply(context.Background(), p, f.payload, nil, nil)
 	require.NoError(t, err)
-	_, err = Uninstall(r, nil)
+	_, err = Uninstall(r, ReasonUninstall, nil)
 	require.NoError(t, err)
 	b, err := os.ReadFile(filepath.Join(f.home, ".config", "hello", "config.json"))
 	require.NoError(t, err)
@@ -333,7 +333,7 @@ func (f *fixture) uninstall(t *testing.T) (*Receipt, []Leftover) {
 	t.Helper()
 	r, err := ReadReceipt(ReceiptPath(f.root()))
 	require.NoError(t, err)
-	left, err := Uninstall(r, nil)
+	left, err := Uninstall(r, ReasonUninstall, nil)
 	require.NoError(t, err)
 	return r, left
 }

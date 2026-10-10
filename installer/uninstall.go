@@ -36,15 +36,22 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 	fl.BoolVar(&gui, "gui", false, "use the wizard")
 	fl.BoolVar(&cli, "cli", false, "use the command line")
 	applyUninstallFlag := fl.Bool("apply-uninstall", false, "used by the uninstaller itself: remove the install as root")
+	upgrade := fl.Bool("upgrade", false, "used by a newer installer: remove this version for an upgrade, without asking or listing leftovers")
 	if err := fl.Parse(args); err != nil {
 		return exitUsage
+	}
+	why := engine.ReasonUninstall
+	if *upgrade {
+		// The installer that runs it shows its steps; the closing lines
+		// and the leftovers are that installer's to tell.
+		why, yes = engine.ReasonUpgrade, true
 	}
 	if *applyUninstallFlag {
 		r, err := ownReceipt()
 		if err != nil {
 			return newHelperOut(e.Out).fail(err)
 		}
-		return applyUninstall(r, removeLeftovers, e)
+		return applyUninstall(r, removeLeftovers, why, e)
 	}
 	if quiet {
 		yes = true
@@ -58,7 +65,7 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 	// phase 4). --yes is accepted for scripts and the installer's
 	// --uninstall; in the window it skips the question.
 	md, err := chooseMode(modeInput{
-		wantGUI: gui, wantCLI: cli, available: guiAvailable, cliOnly: quiet,
+		wantGUI: gui, wantCLI: cli, available: guiAvailable, cliOnly: quiet || *upgrade,
 		interactive: e.Interactive, display: hasDisplay(e.Getenv), root: os.Geteuid() == 0,
 	})
 	if err != nil {
@@ -92,7 +99,7 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 	}
 
 	if needsElevation(r.Scope) {
-		return uninstallElevated(r, removeLeftovers, quiet, verbose, e)
+		return uninstallElevated(r, removeLeftovers, quiet, verbose, why, e)
 	}
 	unlock, err := engine.Lock(r.App.ID, r.Scope, e.Getenv)
 	if err != nil {
@@ -108,7 +115,7 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 			_, _ = fmt.Fprintf(e.Out, "Before removing anything, it runs %s\n", commandLine(h.Exec, h.Args))
 		}
 	}
-	left, err := engine.Uninstall(r, report)
+	left, err := engine.Uninstall(r, why, report)
 	if err != nil {
 		_, _ = fmt.Fprintf(e.Err, "%v\nRun the uninstaller again to retry; its record is %s.\n", err, engine.ReceiptPath(r.Root))
 		return exitFail
@@ -124,7 +131,7 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 	if r.RefreshMenu {
 		refreshMenu(report)
 	}
-	if !quiet {
+	if !quiet && why != engine.ReasonUpgrade {
 		_, _ = fmt.Fprintf(e.Out, "Removed %s %s.\n", r.App.Name, r.App.Version)
 		printLeftovers(e, left, verbose)
 		for _, k := range r.Keep {
@@ -149,11 +156,11 @@ func ownReceipt() (*engine.Receipt, error) {
 // uninstallElevated is the command-line uninstall of a system install: the
 // removal runs in a helper as root, under sudo. The leftovers are listed,
 // or removed with --remove-leftovers, as in a per-user uninstall.
-func uninstallElevated(r *engine.Receipt, removeLeftovers, quiet, verbose bool, e Env) int {
+func uninstallElevated(r *engine.Receipt, removeLeftovers, quiet, verbose bool, why engine.Reason, e Env) int {
 	report := reporter(e, verbose)
 	if quiet {
 		report = reporter(Env{Out: io.Discard, Err: e.Err}, false)
-	} else {
+	} else if why != engine.ReasonUpgrade {
 		_, _ = fmt.Fprintln(e.Out, "This install is for everyone on this computer, so removing it needs an administrator.")
 		for _, h := range r.Hooks {
 			_, _ = fmt.Fprintf(e.Out, "Before removing anything, it runs %s\n", commandLine(h.Exec, h.Args))
@@ -162,6 +169,9 @@ func uninstallElevated(r *engine.Receipt, removeLeftovers, quiet, verbose bool, 
 	args := []string{"--apply-uninstall"}
 	if removeLeftovers {
 		args = append(args, "--remove-leftovers")
+	}
+	if why == engine.ReasonUpgrade {
+		args = append(args, "--upgrade")
 	}
 	h, err := startElevated(context.Background(), false, e.Getenv, e.Err, args, report)
 	if err != nil {
@@ -176,7 +186,7 @@ func uninstallElevated(r *engine.Receipt, removeLeftovers, quiet, verbose bool, 
 	if r.RefreshMenu {
 		refreshMenu(report)
 	}
-	if !quiet {
+	if !quiet && why != engine.ReasonUpgrade {
 		_, _ = fmt.Fprintf(e.Out, "Removed %s %s.\n", r.App.Name, r.App.Version)
 		printLeftovers(e, left, verbose)
 		for _, k := range r.Keep {
