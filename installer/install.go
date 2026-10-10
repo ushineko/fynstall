@@ -229,6 +229,9 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 	}
 	_, _ = fmt.Fprintf(e.Out, "Copied %s files (%s).\n", thousands(len(plan.Files)), humanSize(size))
 	_, _ = fmt.Fprintf(e.Out, "Installed %s %s in %s.\nTo remove it, run %s.\n", m.App.Name, m.App.Version, plan.Root, filepath.Join(plan.Root, engine.UninstallName))
+	for _, d := range plan.PathDirs {
+		_, _ = fmt.Fprintf(e.Out, "%s is on your PATH. A console that you open from now on finds the programs in it.\n", d)
+	}
 	if len(plan.Links) > 0 {
 		if bin := filepath.Dir(plan.Links[0].Dst); !onPath(bin, e.Getenv("PATH")) {
 			_, _ = fmt.Fprintf(e.Out, "%s is not on your PATH, so the links in it are not found by name. Add it to PATH to run them that way.\n", bin)
@@ -275,9 +278,13 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 	for _, r := range replaced {
 		_, _ = fmt.Fprintf(e.Out, "  replaces %s (the uninstaller puts it back)\n", r)
 	}
-	if m := p.Manifest; !platform.HasDesktopIntegration && len(m.Desktop)+len(m.Links)+len(m.Icons) > 0 {
+	if m := p.Manifest; platform.Integration == platform.NoIntegration && len(m.Desktop)+len(m.Links)+len(m.Icons) > 0 {
 		// A part of the config that does nothing here says so (spec 002).
 		_, _ = fmt.Fprintln(e.Out, "  launcher entries, icons and links on PATH are not applied on this platform yet")
+	}
+	// What the install changes outside its own files is always shown.
+	for _, l := range shellLines(p) {
+		_, _ = fmt.Fprintf(e.Out, "  %s\n", l)
 	}
 	// Actions are always shown: a run action runs a payload program.
 	for _, a := range actionLines(p) {
@@ -309,6 +316,26 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 	}
 	_, _ = fmt.Fprintf(e.Out, "  create   %s\n", p.Index)
 	_, _ = fmt.Fprintf(e.Out, "  create   %s\n", engine.ReceiptPath(p.Root))
+}
+
+// shellLines says what p adds to the Start Menu, the registry and PATH, one
+// line each. It is empty off Windows.
+func shellLines(p *engine.Plan) []string {
+	var out []string
+	for _, s := range p.Shortcuts {
+		line := fmt.Sprintf("shortcut %s, which starts %s", s.Dst, commandLine(s.Target, s.Args))
+		if s.Exists {
+			line += "; replaces the one there, which the uninstaller puts back"
+		}
+		out = append(out, line)
+	}
+	for _, k := range p.Registry {
+		out = append(out, fmt.Sprintf("registry %s (%d values)", k.Key, len(k.Values)))
+	}
+	for _, d := range p.PathDirs {
+		out = append(out, fmt.Sprintf("PATH     %s is added to yours, unless it is there already", d))
+	}
+	return out
 }
 
 // actionLines says what each action of p will do, in order, and what the

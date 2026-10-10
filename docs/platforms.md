@@ -57,9 +57,10 @@ which shows the desktop's password dialog) or `sudo` (on the command line).
 
 ## Windows
 
-Windows has per-user installs from the command line. The wizard, an install
-for everyone on the computer, Start Menu shortcuts, the `PATH` entry, the
-entry in Settings > Apps and services follow in spec 001 phase 7.
+Windows has per-user installs from the command line, with a Start Menu
+shortcut, an entry in Settings > Apps and an entry on `PATH`. The wizard, an
+install for everyone on the computer and services follow in spec 001
+phase 7.
 
 ### Paths
 
@@ -72,6 +73,10 @@ entry in Settings > Apps and services follow in spec 001 phase 7.
 | `{bin}` | none |
 | Install index | `{data}\fynstall\installs\<id>.json` |
 | Uninstaller | `<install directory>\uninstall.exe` |
+| Launcher entries | `{config}\Microsoft\Windows\Start Menu\Programs\<name>.lnk` |
+| Icon | `<install directory>\.fynstall\app.ico` |
+| Links | the directory of each link's program, on the user's `PATH` |
+| Record for Settings > Apps | `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<id>` |
 | Install lock | the named mutex `Local\fynstall-<id>-user` |
 
 `{data}` is the local folder, which stays on the machine. `{config}` is the
@@ -81,9 +86,6 @@ of `LOCALAPPDATA` or `APPDATA` is ignored.
 Windows has no directory of links, so there is no `{bin}`. A template that
 names `{bin}` fails with "no value for {bin}".
 
-The installer does not apply `integration.desktop`, `integration.path_links`
-or `app.icon` on Windows yet, and says so before it installs. It installs
-the payload, the configuration files and the uninstaller.
 
 A full installer, with the wizard, does not build for a Windows target yet.
 `fynstall build --cli-only --target windows/amd64` builds from Linux and
@@ -91,6 +93,42 @@ from Windows, with no C compiler.
 
 An installer that offers both scopes installs per-user on Windows.
 `--scope system` stops and says that the scope is not available.
+
+### The Start Menu, Settings and PATH
+
+The config keys are the same as on Linux, and the Windows backend does what
+Windows expects for each.
+
+- **`integration.desktop`** makes a Start Menu shortcut for each entry,
+  named for the entry. The installer writes it through the Windows shell.
+  `categories`, `keywords` and the other launcher keys have no meaning in a
+  shortcut and are not used.
+- **`app.icon`** becomes one `.ico` file with the sizes 16, 32, 48, 64 and
+  256, made when the installer is built. The shortcut and Settings > Apps
+  show it. The installer's own `.exe` does not carry it yet.
+- **`integration.path_links`** puts the directory of each named program on
+  the user's `PATH`. Windows finds a program by its file name, so there is
+  no link. A console that is opened after the install has the new `PATH`.
+- **Every install** has an entry in Settings > Apps. Its fields come from
+  `app` and the install: name, version, publisher, location, icon, size,
+  and the commands that run the installed `uninstall.exe`. No config key
+  sets them.
+
+The plan lists the shortcut, the registry key and the `PATH` entry before
+the install starts, and `--dry-run` prints them.
+
+### What the uninstaller puts back
+
+The receipt records each registry key that the install made and the earlier
+content of each value that it wrote. The uninstaller writes those values
+back and removes the keys that it made, when they are empty. A shortcut that
+was already there comes back as it was.
+
+`PATH` is different, because other installers change it too. The installer
+adds its directory at the end and records only that directory. The
+uninstaller removes that one entry and leaves the rest of the value as it
+finds it. A directory that was on `PATH` before the install is not added
+again, and the uninstaller does not remove it.
 
 ### The uninstaller removes itself
 

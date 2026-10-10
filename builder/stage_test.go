@@ -1,6 +1,10 @@
 package builder
 
 import (
+	"bytes"
+	"encoding/binary"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,4 +197,57 @@ func TestOneConfigStagesADifferentPayloadPerTarget(t *testing.T) {
 	require.Equal(t, map[string]string{"bin/greet": "build/linux-amd64/greet"}, files("linux/amd64"))
 	require.Equal(t, map[string]string{"bin/greet": "build/linux-arm64/greet", "share/arm64.txt": "notes/arm64.txt"}, files("linux/arm64"))
 	require.Equal(t, map[string]string{"bin/greet.exe": "build/windows-amd64/greet.exe"}, files("windows/amd64"))
+}
+
+// A Windows target gets the app icon as one .ico payload file, and none of
+// the hicolor PNGs, which only a Linux desktop reads.
+func TestAWindowsTargetGetsTheIconAsAnIcoFile(t *testing.T) {
+	dir := tree(t, map[string]string{"bin/hello.exe": "MZ"})
+	img := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+	for i := range img.Pix {
+		img.Pix[i] = byte(i)
+	}
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, img))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "icon.png"), buf.Bytes(), 0o600))
+	c := cfg(dir, config.Entry{Src: "bin/hello.exe", Dst: "bin/hello.exe"})
+	c.App.Icon = "icon.png"
+
+	m, _, generated, err := stage(c, "test", "windows/amd64")
+	require.NoError(t, err)
+	require.Empty(t, m.Icons)
+	require.Equal(t, []string{manifest.WindowsIcon, "bin/hello.exe"}, []string{m.Files[0].Path, m.Files[1].Path}, "sorted with the payload")
+	b := generated[manifest.WindowsIcon]
+	require.Equal(t, int64(len(b)), m.Files[0].Size)
+	require.Equal(t, []byte{0, 0, 1, 0, 5, 0}, b[:6], "an icon file with five images")
+
+	// Each entry: width, height, then the size and offset of its image.
+	end := 6 + 16*5
+	for i, size := range []int{16, 32, 48, 64, 256} {
+		e := b[6+16*i : 6+16*(i+1)]
+		require.Equal(t, byte(size), e[0], "256 is written as 0")
+		n, off := int(binary.LittleEndian.Uint32(e[8:])), int(binary.LittleEndian.Uint32(e[12:]))
+		require.Equal(t, end, off, "the images follow each other")
+		end += n
+		if size == 256 {
+			cfg, err := png.DecodeConfig(bytes.NewReader(b[off : off+n]))
+			require.NoError(t, err)
+			require.Equal(t, 256, cfg.Width)
+			continue
+		}
+		require.Equal(t, uint32(40), binary.LittleEndian.Uint32(b[off:]), "a bitmap header")
+		require.Equal(t, uint32(2*size), binary.LittleEndian.Uint32(b[off+8:]), "the height counts the mask")
+		require.Equal(t, 40+4*size*size+(size+31)/32*4*size, n, "pixels and mask")
+	}
+	require.Len(t, b, end)
+
+	again, _, generatedAgain, err := stage(c, "test", "windows/amd64")
+	require.NoError(t, err)
+	require.Equal(t, m.Files[0].SHA256, again.Files[0].SHA256)
+	require.Equal(t, b, generatedAgain[manifest.WindowsIcon], "the same source gives the same bytes")
+
+	linux, _, _, err := stage(c, "test", "linux/amd64")
+	require.NoError(t, err)
+	require.Len(t, linux.Icons, 7)
+	require.Len(t, linux.Files, 1, "and Linux gets no .ico")
 }

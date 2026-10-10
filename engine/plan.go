@@ -89,6 +89,13 @@ type Plan struct {
 	Symlinks []PlannedLink
 	// Links go in {bin}.
 	Links []PlannedLink
+	// Shortcuts, Registry, and PathDirs on the PATH value of PathKey, are
+	// what launcher entries, the install's own record and links become on
+	// Windows (spec 002 L8 and L10).
+	Shortcuts []PlannedShortcut
+	Registry  []PlannedKey
+	PathKey   string
+	PathDirs  []string
 	// Actions are the service, run and migrate actions, in config order.
 	Actions []PlannedAction
 	// Hooks are the uninstall hooks the receipt keeps.
@@ -209,6 +216,9 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	for _, l := range slices.Concat(p.Symlinks, p.Links) {
 		dirs = append(dirs, filepath.Dir(l.Dst))
 	}
+	for _, s := range p.Shortcuts {
+		dirs = append(dirs, filepath.Dir(s.Dst))
+	}
 	for _, a := range p.Actions {
 		switch {
 		case a.Service != nil:
@@ -259,7 +269,10 @@ func (p *Plan) inRoot(rel string) string {
 // outside the install directory: under {data} and {bin}.
 func (p *Plan) addIntegration(vars map[string]string) error {
 	m := p.Manifest
-	if !platform.HasDesktopIntegration {
+	switch platform.Integration {
+	case platform.WindowsShell:
+		return p.addShellIntegration(vars)
+	case platform.NoIntegration:
 		return nil
 	}
 	data, bin := vars["data"], vars["bin"]

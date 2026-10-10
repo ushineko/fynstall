@@ -7,8 +7,8 @@ import (
 	"runtime"
 )
 
-// HasDesktopIntegration is false: this OS has no backend.
-const HasDesktopIntegration = false
+// Integration is none: this OS has no backend.
+const Integration = NoIntegration
 
 func vars(string, func(string) string) (map[string]string, error) {
 	return nil, fmt.Errorf("installing on %s is not supported yet", runtime.GOOS)
