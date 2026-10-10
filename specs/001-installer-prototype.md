@@ -1045,6 +1045,25 @@ both files. `--dry-run` listed the install under
 `%LOCALAPPDATA%\Programs\io.ushineko.hello` with the shortcut, the registry
 key and the `PATH` entry, and changed nothing.
 
+The desk check in the real profile (2026-10-10, Windows 11 Pro, that
+installer). The install exited 0 and wrote the install directory, the
+shortcut `Hello.lnk`, the Uninstall key with its 10 values and one entry at
+the end of the user `PATH` (14 entries became 15, the kind of the value
+unchanged). The maintainer looked at the Start Menu entry and its icon,
+the entry in Settings > Apps, the program by name in a new console and the
+icon of the `.exe` files in Explorer, and reported all of them good.
+
+The installed `uninstall.exe`, run from another directory, exited 0. After
+it: `fc` of the `reg export` of `HKCU\Environment` taken before the install
+and after the uninstall found no differences; the Uninstall key, the
+install directory, the shortcut and `%LOCALAPPDATA%\fynstall` were gone;
+the moved uninstaller was in `%TEMP%` as `fynstall-removed-<number>.exe`,
+as R9f for per-user scope says.
+
+Not exercised: Uninstall from Settings > Apps (the uninstall was run from a
+console, so the criterion stays open), and the questions and the hidden
+secret of the phase 7a console check.
+
 ### Phase 7a (2026-10-10)
 
 On Windows 11 Pro, Go 1.27.0, with the MSYS2 UCRT64 gcc for the packages
