@@ -42,7 +42,8 @@ func Install(args []string, p Payload, e Env) int {
 	fl.BoolVar(&f.verbose, "verbose", false, "list every file and directory as it is written")
 	fl.BoolVar(&f.version, "version", false, "print the version and exit")
 	fl.StringVar(&f.dir, "dir", "", "install directory (default from the installer)")
-	fl.StringVar(&f.scope, "scope", "", "install scope")
+	fl.StringVar(&f.scope, "scope", "", "install scope: user, or system for everyone on this computer")
+	applyPlanFile := fl.String("apply-plan", "", "used by the installer itself: apply the plan in this file as root")
 	paramValues := paramFlags(fl, m)
 	if err := fl.Parse(args); err != nil {
 		return exitUsage
@@ -60,13 +61,16 @@ func Install(args []string, p Payload, e Env) int {
 		_, _ = fmt.Fprintf(e.Err, "This installer's payload is for %s, but the installer was built for %s. Rebuild it.\n", m.Target, built)
 		return exitFail
 	}
+	if *applyPlanFile != "" {
+		return applyPlan(*applyPlanFile, m, p, e)
+	}
 	if f.scope == "" {
 		f.scope = m.Scopes[0]
 	}
 	md, err := chooseMode(modeInput{
 		wantGUI: f.gui, wantCLI: f.cli, available: guiAvailable,
 		cliOnly:     f.yes || f.dryRun || f.uninstall || f.forceReceipt,
-		interactive: e.Interactive, display: hasDisplay(e.Getenv),
+		interactive: e.Interactive, display: hasDisplay(e.Getenv), root: os.Geteuid() == 0,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintln(e.Err, err)
@@ -115,7 +119,8 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
 		return exitUsage
 	}
-	if !f.dryRun {
+	elevate := needsElevation(f.scope)
+	if !f.dryRun && !elevate {
 		unlock, err := engine.Lock(m.App.ID, f.scope, e.Getenv)
 		if err != nil {
 			_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
@@ -159,7 +164,13 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	report := reporter(e, f.verbose)
-	if _, err := engine.Apply(ctx, plan, p.Files, p.Uninstaller, report); err != nil {
+	if elevate {
+		_, _ = fmt.Fprintln(e.Out, "This install is for everyone on this computer, so it needs an administrator.")
+		if err := applyRequest(ctx, plan, false, e, report); err != nil {
+			_, _ = fmt.Fprintf(e.Err, "%v\n", err)
+			return exitFail
+		}
+	} else if _, err := engine.Apply(ctx, plan, p.Files, p.Uninstaller, report); err != nil {
 		_, _ = fmt.Fprintf(e.Err, "Install failed, and the changes were undone: %v\n", err)
 		return exitFail
 	}

@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -53,9 +55,11 @@ type installWizard struct {
 	f       installFlags
 	e       Env
 	options wizard.Options
-	// form holds the parameters; dir the install directory.
-	form *forms.Form
-	dir  *wizard.DirectoryPage
+	// form holds the parameters; dirs the install directory of each scope,
+	// of which the one for scope is shown.
+	form  *forms.Form
+	dirs  map[string]*scopedDir
+	scope string
 	// plan is made when the summary page is entered.
 	plan    *engine.Plan
 	planErr error
@@ -69,7 +73,7 @@ type installWizard struct {
 // Welcome, Licence, Settings, Location, Ready, Installing, Done. A page
 // with nothing to show is left out.
 func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*installWizard, error) {
-	g := &installWizard{m: m, p: p, f: f, e: e}
+	g := &installWizard{m: m, p: p, f: f, e: e, scope: f.scope, dirs: map[string]*scopedDir{}}
 	g.options = wizard.Options{
 		AppID: m.App.ID + ".installer",
 		Name:  m.App.Name + " " + m.App.Version,
@@ -96,19 +100,26 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 		}
 		pages = append(pages, page)
 	}
-	root := f.dir
-	if root == "" {
-		if root, err = engine.DefaultRoot(m, f.scope, e.Getenv); err != nil {
-			return nil, err
-		}
+	if len(m.Scopes) > 1 {
+		pages = append(pages, &scopePage{g: g})
 	}
-	g.dir = wizard.Directory("Location", "Install "+m.App.Name+" into:", root, func(s string) error {
-		if !filepath.IsAbs(s) {
-			return errors.New("choose an absolute path")
+	for _, scope := range m.Scopes {
+		root := f.dir
+		if root == "" || scope != f.scope {
+			if root, err = engine.DefaultRoot(m, scope, e.Getenv); err != nil {
+				return nil, err
+			}
 		}
-		return nil
-	})
-	pages = append(pages, g.dir, &summaryPage{g: g})
+		d := &scopedDir{g: g, scope: scope, DirectoryPage: wizard.Directory("Location", "Install "+m.App.Name+" into:", root, func(s string) error {
+			if !filepath.IsAbs(s) {
+				return errors.New("choose an absolute path")
+			}
+			return nil
+		})}
+		g.dirs[scope] = d
+		pages = append(pages, d)
+	}
+	pages = append(pages, &summaryPage{g: g})
 	pages = append(pages, wizard.Progress("Installing", engine.ManifestSteps(m), m.App.Name+" is installed.", g.job).WithBar())
 	var checks []*widget.Check
 	if m.Launch != "" {
@@ -128,8 +139,16 @@ func (g *installWizard) welcome() string {
 	if g.m.App.Publisher != "" {
 		s += " from " + g.m.App.Publisher
 	}
-	return s + ".\n\nIt goes into your home directory and needs no administrator rights. " +
-		"It installs an uninstaller beside the program, which puts back anything the install replaced."
+	switch {
+	case slices.Contains(g.m.Scopes, "system") && len(g.m.Scopes) > 1:
+		s += ".\n\nInstalled for you, it needs no administrator rights. Installed for everyone on this computer, " +
+			"it asks for an administrator once. "
+	case slices.Contains(g.m.Scopes, "system"):
+		s += ".\n\nIt is installed for everyone on this computer, so it asks for an administrator once. "
+	default:
+		s += ".\n\nIt goes into your home directory and needs no administrator rights. "
+	}
+	return s + "It installs an uninstaller beside the program, which puts back anything the install replaced."
 }
 
 func (g *installWizard) finishText() string {
@@ -213,7 +232,7 @@ func (s *summaryPage) Build(*wizard.Wizard) fyne.CanvasObject {
 func (s *summaryPage) Enter(w *wizard.Wizard) {
 	g := s.g
 	g.plan, g.planErr = engine.NewPlan(g.m, engine.Options{
-		Scope: g.f.scope, Root: g.dir.Value(), Env: g.e.Getenv, Uninstaller: g.p.Uninstaller, Params: g.params(),
+		Scope: g.scope, Root: g.dirs[g.scope].Value(), Env: g.e.Getenv, Uninstaller: g.p.Uninstaller, Params: g.params(),
 	})
 	s.box.Objects = nil
 	if g.planErr != nil {
@@ -260,14 +279,59 @@ func (s *summaryPage) Enter(w *wizard.Wizard) {
 	s.box.Refresh()
 }
 
+// Labels of the scope choice.
+const (
+	ForMe       = "Just me"
+	ForEveryone = "Everyone on this computer (asks for an administrator)"
+)
+
+// scopePage asks who the install is for, when the config offers both.
+type scopePage struct {
+	g     *installWizard
+	radio *widget.RadioGroup
+}
+
+func (s *scopePage) Title() string { return "Install for" }
+
+func (s *scopePage) Build(w *wizard.Wizard) fyne.CanvasObject {
+	s.radio = widget.NewRadioGroup([]string{ForMe, ForEveryone}, func(choice string) {
+		s.g.scope = "user"
+		if choice == ForEveryone {
+			s.g.scope = "system"
+		}
+		w.Revalidate()
+	})
+	s.radio.Required = true
+	if s.g.scope == "system" {
+		s.radio.SetSelected(ForEveryone)
+	} else {
+		s.radio.SetSelected(ForMe)
+	}
+	return container.NewVBox(widgets.Wrapped("Who is "+s.g.m.App.Name+" for?"), s.radio)
+}
+
+// scopedDir is the location page of one scope; it is skipped while the
+// other scope is chosen, so each scope keeps its own default and what the
+// person typed for it.
+type scopedDir struct {
+	*wizard.DirectoryPage
+	g     *installWizard
+	scope string
+}
+
+func (d *scopedDir) Skip() bool { return d.g.scope != d.scope }
+
 // job installs the plan the summary page made, reporting the engine's
 // steps and files to the progress page.
 func (g *installWizard) job(ctx context.Context, r *wizard.Reporter) error {
-	unlock, err := engine.Lock(g.m.App.ID, g.plan.Scope, g.e.Getenv)
-	if err != nil {
-		return err
+	elevate := needsElevation(g.plan.Scope)
+	if !elevate {
+		unlock, err := engine.Lock(g.m.App.ID, g.plan.Scope, g.e.Getenv)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 	}
-	defer unlock()
 	last := -1
 	report := func(ev engine.Event) {
 		switch ev.Kind {
@@ -293,7 +357,11 @@ func (g *installWizard) job(ctx context.Context, r *wizard.Reporter) error {
 			r.Progress(fraction, countsText(ev.Counts), g.short(ev.Text))
 		}
 	}
-	if _, err := engine.Apply(ctx, g.plan, g.p.Files, g.p.Uninstaller, report); err != nil {
+	if elevate {
+		if err := applyRequest(ctx, g.plan, true, g.e, report); err != nil {
+			return err
+		}
+	} else if _, err := engine.Apply(ctx, g.plan, g.p.Files, g.p.Uninstaller, report); err != nil {
 		return err
 	}
 	if last >= 0 {
@@ -378,11 +446,99 @@ func notice(title, text string) {
 // uninstallGUI asks once, removes, and reports, in one small window
 // (fynedesygn spec 062). skip is --yes: the window shows only the result.
 func uninstallGUI(r *engine.Receipt, skip bool, env func(string) string) int {
-	res := wizard.RunConfirm(uninstallConfirm(r, skip, env))
+	o, done := uninstallConfirm(r, skip, env)
+	res := wizard.RunConfirm(o)
+	done()
 	if res.Outcome != wizard.Finished {
 		return exitFail
 	}
 	return exitOK
+}
+
+// uninstallConfirm is the uninstaller's question, its job and its result.
+// When the program left files the install did not create, the window then
+// lists them and offers to remove them too (spec 002 D5).
+//
+// A system install is removed by a helper under pkexec (spec 001 R13). The
+// helper waits after the uninstall while the window asks about the
+// leftovers, so the person is asked for an administrator once. done ends a
+// helper the window left waiting.
+func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) (wizard.ConfirmOptions, func()) {
+	var left []engine.Leftover
+	var h *helper
+	done := func() {
+		if h != nil {
+			_ = h.finish() // keeps the leftovers
+			h = nil
+		}
+	}
+	detail := fmt.Sprintf("It removes `%s`, and puts back anything its install replaced.", r.Root)
+	if needsElevation(r.Scope) {
+		detail += "\n\nIt is installed for everyone on this computer, so it asks for an administrator."
+	}
+	for _, hk := range r.Hooks {
+		detail += fmt.Sprintf("\n\nBefore removing anything, it runs `%s`.", commandLine(hk.Exec, hk.Args))
+	}
+	for _, k := range r.Keep {
+		detail += fmt.Sprintf("\n\nYour data in `%s`, if any, is left where it is.", k)
+	}
+	report := func(engine.Event) {}
+	uninstall := func(ctx context.Context) error {
+		if needsElevation(r.Scope) {
+			// Not the job's context: the window cancels that when the job
+			// returns, and the helper must outlive it to hear the answer
+			// about the leftovers. An uninstall is not cancelled part-way.
+			var err error
+			if h, err = startElevated(context.WithoutCancel(ctx), true, env, os.Stderr, []string{"--apply-uninstall"}, report); err != nil {
+				return err
+			}
+			if left = h.next(); len(left) == 0 {
+				err, h = h.finish(), nil
+				return err
+			}
+			return nil
+		}
+		unlock, err := engine.Lock(r.App.ID, r.Scope, env)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		left, err = engine.Uninstall(r, report)
+		return err
+	}
+	return wizard.ConfirmOptions{
+		AppID:    r.App.ID + ".uninstaller",
+		Name:     "Uninstall " + r.App.Name,
+		Question: fmt.Sprintf("Uninstall %s %s?", r.App.Name, r.App.Version),
+		Detail:   detail,
+		Action:   "Uninstall", Destructive: true,
+		Done:         fmt.Sprintf("%s %s was removed.", r.App.Name, r.App.Version),
+		SkipQuestion: skip,
+		Job: func(ctx context.Context) error {
+			if err := uninstall(ctx); err != nil {
+				return err
+			}
+			if r.RefreshMenu {
+				refreshMenu(report)
+			}
+			return nil
+		},
+		Then: &wizard.ConfirmStep{
+			Action: "Remove them too", Destructive: true, Decline: "Keep them",
+			Ask: func() (string, string, bool) {
+				return fmt.Sprintf("%s left %s it made.", r.App.Name, leftoverCount(left)), leftoversDetail(left), len(left) > 0
+			},
+			Job: func(context.Context) error {
+				if h != nil {
+					err := h.removeLeftovers()
+					h = nil
+					return err
+				}
+				return engine.RemoveLeftovers(r, left, report)
+			},
+			Done: fmt.Sprintf("%s %s was removed, with the files it made.", r.App.Name, r.App.Version),
+		},
+	}, done
 }
 
 // leftoversDetail is the Markdown under the leftovers question: why they
@@ -408,51 +564,3 @@ var gloss = map[string]string{ //nolint:gochecknoglobals // a fixed table
 
 // shownLeftoversGUI is how many leftovers the window lists by name.
 const shownLeftoversGUI = 50
-
-// uninstallConfirm is the uninstaller's question, its job and its result.
-// When the program left files the install did not create, the window then
-// lists them and offers to remove them too (spec 002 D5).
-func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) wizard.ConfirmOptions {
-	var left []engine.Leftover
-	detail := fmt.Sprintf("It removes `%s`, and puts back anything its install replaced.", r.Root)
-	for _, h := range r.Hooks {
-		detail += fmt.Sprintf("\n\nBefore removing anything, it runs `%s`.", commandLine(h.Exec, h.Args))
-	}
-	for _, k := range r.Keep {
-		detail += fmt.Sprintf("\n\nYour data in `%s`, if any, is left where it is.", k)
-	}
-	return wizard.ConfirmOptions{
-		AppID:    r.App.ID + ".uninstaller",
-		Name:     "Uninstall " + r.App.Name,
-		Question: fmt.Sprintf("Uninstall %s %s?", r.App.Name, r.App.Version),
-		Detail:   detail,
-		Action:   "Uninstall", Destructive: true,
-		Done:         fmt.Sprintf("%s %s was removed.", r.App.Name, r.App.Version),
-		SkipQuestion: skip,
-		Job: func(context.Context) error {
-			report := func(engine.Event) {}
-			unlock, err := engine.Lock(r.App.ID, r.Scope, env)
-			if err != nil {
-				return err
-			}
-			defer unlock()
-			if left, err = engine.Uninstall(r, report); err != nil {
-				return err
-			}
-			if r.RefreshMenu {
-				refreshMenu(report)
-			}
-			return nil
-		},
-		Then: &wizard.ConfirmStep{
-			Action: "Remove them too", Destructive: true, Decline: "Keep them",
-			Ask: func() (string, string, bool) {
-				return fmt.Sprintf("%s left %s it made.", r.App.Name, leftoverCount(left)), leftoversDetail(left), len(left) > 0
-			},
-			Job: func(context.Context) error {
-				return engine.RemoveLeftovers(r, left, func(engine.Event) {})
-			},
-			Done: fmt.Sprintf("%s %s was removed, with the files it made.", r.App.Name, r.App.Version),
-		},
-	}
-}

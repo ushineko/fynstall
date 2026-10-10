@@ -14,6 +14,9 @@ type Unit struct {
 	Args        []string
 	// Restart is no, on-failure or always.
 	Restart string
+	// System is true for a system service, which starts with the machine
+	// rather than at the user's login.
+	System bool
 }
 
 // RenderUnit is u as a systemd unit file. Every argument is quoted, and
@@ -28,7 +31,11 @@ func RenderUnit(u Unit) []byte {
 	fmt.Fprintf(&b, "# Written by the installer of %s. Its uninstaller removes it.\n", u.AppID)
 	fmt.Fprintf(&b, "[Unit]\nDescription=%s\n\n", u.Description)
 	fmt.Fprintf(&b, "[Service]\nExecStart=%s\nRestart=%s\n\n", strings.Join(words, " "), u.Restart)
-	b.WriteString("[Install]\nWantedBy=default.target\n")
+	target := "default.target"
+	if u.System {
+		target = "multi-user.target"
+	}
+	fmt.Fprintf(&b, "[Install]\nWantedBy=%s\n", target)
 	return []byte(b.String())
 }
 

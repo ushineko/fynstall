@@ -241,13 +241,27 @@ drifts from what is on disk.
   directory only the user can write. The helper re-checks every payload
   sha256 from its own embedded copy. It does not trust hashes from the plan
   file.
+  - Settled in phase 5 (2026-10-09): the plan file holds only the inputs
+    (scope, directory, parameter values) and the sha256 of the plan the
+    person approved. The helper makes the plan again, as root, from its own
+    embedded payload, and refuses when its digest differs. No path or hash
+    in the file is used.
+  - The helper's stdin is its cancel: the person cannot signal a root
+    process, so the parent closes the pipe and the helper cancels and
+    undoes.
+  - The uninstaller elevates itself the same way. The list for "Remove
+    them too" passes to the second elevation through a root-owned file
+    under `/run/fynstall`, never through one the person supplies.
 
 ### Desktop integration (Linux)
 
 - R15 Per-user scope: `.desktop` in `~/.local/share/applications`, icons in
   `~/.local/share/icons/hicolor/<size>/apps`, and links in `~/.local/bin`.
-  System scope: `/usr/share/applications`, `/usr/share/icons/hicolor` and
-  `/usr/local/bin`. After a change, the installer and the uninstaller
+  System scope: `/usr/local/share/applications`,
+  `/usr/local/share/icons/hicolor` and `/usr/local/bin`; `/usr/share`
+  belongs to the package manager (changed in phase 5, 2026-10-09). The
+  system install index is `/var/lib/fynstall/installs`, and `{config}` is
+  `/etc`. After a change, the installer and the uninstaller
   refresh the menu with `kbuildsycoca6` if it is present. A failure there is
   a warning and not an error. `update-desktop-database` is not run: it
   rebuilds only `mimeinfo.cache`, the entries declare no MIME types, and
@@ -466,19 +480,30 @@ Lands with spec 002 phase 4b: the privileged helper applies the actions
 that spec 002 phase 4a adds in per-user scope. Spec 002 phase 3 (symlinks
 and leftovers) comes first.
 
-- [ ] Helper protocol test: the parent starts the helper without elevation
+Tests run the helper through a stand-in for `pkexec` (`FYNSTALL_ELEVATE`)
+and with the system paths under a temporary directory
+(`FYNSTALL_TEST_SYSTEM_ROOT`, ignored when running as root).
+
+- [x] Helper protocol test: the parent starts the helper without elevation
       (test hook), receives JSON events, and handles a helper crash as a
-      failed step (integration).
-- [ ] R14 test: a plan file whose hashes have been edited is refused by the
-      helper (integration).
-- [ ] Desk check: GUI install in system scope shows one pkexec prompt. Files
-      are in `/opt/io.ushineko.hello`, `/usr/share/applications` and
-      `/usr/local/bin`. `ps` during install shows the Fyne process running as
-      the user. CLI system install uses `sudo`. Uninstall in each case asks
-      for elevation once and removes everything.
-- [ ] The privileged helper applies actions as well as files (spec 002
-      D2a): a `service` action as a systemd system unit, the install lock
-      (L3) and permissions (L4).
+      failed step (integration). (`TestASystemInstallRunsInTheHelperAndItsUninstallerElevatesToo`,
+      `TestAHelperThatDiesIsAFailedInstall`,
+      `TestARefusedAdministratorChangesNothing`,
+      `TestASystemUninstallListsOrRemovesTheLeftovers`.)
+- [x] R14 test: a plan file whose digest does not match the plan the
+      helper makes is refused, and nothing changes (integration).
+      (`TestAPlanFileThatWasEditedIsRefused`.)
+- [x] The wizard offers "Just me" and "Everyone on this computer" when the
+      config offers both scopes, and the choice sets the default
+      directory (headless). (`TestTheWizardAsksWhoTheInstallIsFor`.)
+- [x] Desk check: GUI install in system scope shows one pkexec prompt. Files
+      are in `/opt/io.ushineko.hello`, `/usr/local/share/applications` and
+      `/usr/local/bin`. `ps` during install shows the Fyne process running
+      as the user. CLI system install uses `sudo`. Uninstall in each case
+      asks for elevation once and removes everything.
+- [x] The privileged helper applies actions as well as files (spec 002
+      D2a): a `service` action as a systemd system unit, and the install
+      lock (L3) in `/run/fynstall`. Permissions (L4) moved to phase 7.
 
 ### Phase 6: upgrade, repair, and a real consumer (R17)
 
@@ -646,6 +671,40 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 5 (2026-10-09)
+
+On CachyOS with KDE Plasma 6 on Wayland. `make test` (with `-race`),
+`make lint` (0 issues) and `govulncheck` (no vulnerabilities) pass. A
+listing of `/opt`, `/usr/local/bin`, `/usr/local/share`, `/etc`,
+`/etc/systemd/system` and `/var/lib` taken before the desk check matched
+the one taken after it.
+
+- GUI install: the wizard asked "Install for", and with "Everyone on this
+  computer" showed one pkexec prompt. `ps` showed the wizard running as
+  the user. The install was root-owned in `/opt/io.ushineko.hello`, with
+  `/usr/local/bin/hello`, the launcher entry in
+  `/usr/local/share/applications` and the index in
+  `/var/lib/fynstall/installs`; nothing went into the home.
+- GUI uninstall from the launcher's "Uninstall Hello", with a file made as
+  root in `bin/`: one pkexec prompt, then the leftovers question; "Remove
+  them too" removed it with no second prompt, and the whole install was
+  gone, `/usr/local/share/icons` included, which the install had created.
+- Found on the way: the first run of that uninstall said the leftover was
+  removed, and it was not. The window had started the helper with the
+  confirm job's context, which the window cancels when the job returns;
+  that closed the helper's input, which the helper reads as "keep them".
+  The helper now outlives the job, and a removal counts only when the
+  helper confirms it (`TestTheUninstallWindowKeepsItsHelperForTheAnswer`,
+  which fails with the old code).
+- CLI install and uninstall with `--scope system` went through `sudo`.
+  This machine's sudoers has `NOPASSWD: ALL`, so `sudo` asked for nothing;
+  the output said the change needed an administrator, and the files were
+  root-owned.
+- `examples/beacon` with `--scope system`: `beacon.service` in
+  `/etc/systemd/system`, enabled and running as root in `system.slice`;
+  the run action wrote `/etc/beacon/setup-done`. The uninstall ran the
+  hook, then the teardown, removed the service, then the files.
 
 ### Phase 4 (2026-10-08)
 

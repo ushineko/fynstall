@@ -22,6 +22,9 @@ type modeInput struct {
 	// interactive is a terminal on stdin; display is DISPLAY or
 	// WAYLAND_DISPLAY set.
 	interactive, display bool
+	// root is true when the process runs as root, which the window never
+	// does (spec 001 R13).
+	root bool
 }
 
 /*
@@ -35,13 +38,15 @@ func chooseMode(in modeInput) (mode, error) {
 	switch {
 	case in.wantGUI && in.wantCLI:
 		return modeCLI, errors.New("--gui and --cli ask for different things; give one")
+	case in.wantGUI && in.root:
+		return modeCLI, errors.New("the window does not run as root: run the installer as yourself, and it asks for an administrator when it needs one")
 	case in.wantGUI && !in.available:
 		return modeCLI, errors.New("this installer was built without the wizard (--cli-only); run it without --gui")
 	case in.wantGUI && !in.display:
 		return modeCLI, errors.New("--gui needs a display, and neither DISPLAY nor WAYLAND_DISPLAY is set")
 	case in.wantGUI:
 		return modeGUI, nil
-	case in.wantCLI, !in.available, in.cliOnly, in.interactive, !in.display:
+	case in.wantCLI, !in.available, in.cliOnly, in.interactive, !in.display, in.root:
 		return modeCLI, nil
 	}
 	return modeGUI, nil

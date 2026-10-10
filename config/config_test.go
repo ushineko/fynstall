@@ -282,3 +282,18 @@ func TestActionsAreChecked(t *testing.T) {
 		})
 	}
 }
+
+func TestASystemInstallHasNoHome(t *testing.T) {
+	c := "app:\n  id: io.example.hello\n  name: Hello\n  version: 0.1.0\npayload:\n  - src: bin/hello\n    dst: bin/hello\n" +
+		"install:\n  scopes: [user, system]\nintegration:\n  keep_on_uninstall: [\"{home}/.hello\"]\n"
+	_, err := Load(write(t, c))
+	var errs Errors
+	require.True(t, errors.As(err, &errs), "%v", err)
+	require.Len(t, errs, 1, "%v", errs)
+	require.Equal(t, "integration.keep_on_uninstall", errs[0].Field)
+	require.Equal(t, 11, errs[0].Line)
+	require.Contains(t, errs[0].Msg, "does not have")
+
+	_, err = Load(write(t, strings.Replace(c, "[user, system]", "[user]", 1)))
+	require.NoError(t, err, "a per-user install has a home")
+}

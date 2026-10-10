@@ -129,6 +129,7 @@ func validate(c *Config, root *yaml.Node) Errors {
 	}
 	k.links(c)
 	k.desktop(c)
+	k.noHomeInSystem(c)
 	k.parameters(c)
 	k.actions(c)
 	k.textFile(c, c.App.Licence, "app.licence", "app", "licence")
@@ -160,6 +161,41 @@ func validate(c *Config, root *yaml.Node) Errors {
 		}
 	}
 	return k.errs
+}
+
+// noHomeInSystem refuses {home} in a config that offers system scope: a
+// system install is for every user, so it has no home (spec 001 R15).
+func (k *checker) noHomeInSystem(c *Config) {
+	if !slices.Contains(c.Install.Scopes, "system") {
+		return
+	}
+	check := func(v, field string, keys ...any) {
+		if strings.Contains(v, "{home}") {
+			k.fail(k.line(keys...), field, "%q uses {home}, which a system install for every user does not have; use {data} or {config}", v)
+		}
+	}
+	check(c.Install.Dir["system"], "install.dir.system", "install", "dir", "system")
+	for i, p := range c.Integration.KeepOnUninstall {
+		check(p, "integration.keep_on_uninstall", "integration", "keep_on_uninstall", i)
+	}
+	for i, a := range c.Actions {
+		field := fmt.Sprintf("actions[%d]", i)
+		switch {
+		case a.ConfigFile != nil:
+			check(a.ConfigFile.Path, field+".config_file.path", "actions", i, "config_file", "path")
+		case a.Migrate != nil:
+			check(a.Migrate.From, field+".migrate.from", "actions", i, "migrate", "from")
+			check(a.Migrate.To, field+".migrate.to", "actions", i, "migrate", "to")
+		case a.Service != nil:
+			for j, arg := range a.Service.Args {
+				check(arg, field+".service.args", "actions", i, "service", "args", j)
+			}
+		case a.Run != nil:
+			for j, arg := range append(append([]string{}, a.Run.Args...), a.Run.Undo.Args...) {
+				check(arg, field+".run.args", "actions", i, "run", "args", j)
+			}
+		}
+	}
 }
 
 func (k *checker) template(tmpl, field string, keys ...any) {

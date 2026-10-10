@@ -267,7 +267,7 @@ Settled for phase 4a (2026-10-09):
 - **Phase 4 is two PRs.** 4a lands the actions in per-user scope, where a
   `service` is a systemd *user* unit (`{config}/systemd/user`, `systemctl
   --user`) and nothing needs root. 4b is spec 001 phase 5: the privileged
-  helper, system units, and L4.
+  helper and system units; L4 moved to phase 7.
 - **A service action owns its unit file.** Its journal entry holds the
   unit's path, a backup of a unit that was there, and whether that unit was
   enabled and active. The undo stops and disables the install's unit, puts
@@ -458,8 +458,9 @@ where it goes.
 - **L4 Permissions.** One `permissions` concept on a directory: who may
   read, who may write, as roles (`admins`, `service`, `users`). The Linux
   backend turns it into owner, group and mode; the Windows backend into an
-  ACL. Not `icacls` arguments in the config. System scope only. Phase 5
-  (Linux) and phase 7 (Windows).
+  ACL. Not `icacls` arguments in the config. System scope only. Phase 7,
+  Linux and Windows together (moved from phase 5 on 2026-10-09: the
+  `service` role has no account on Linux until services take a `user:`).
 - **L5 Migration from an older install.** A `migrate` action that moves a
   known old path into a new one, journalled. The new install's uninstaller
   does not put the old layout back; the summary page says so. Spec 002
@@ -489,7 +490,7 @@ where it goes.
 - **Phase 4 (GUI and mode selection)** gains the parameters page (D3). The
   mode selection is unchanged.
 - **Phase 5 (system scope)** becomes the first phase with actions: a
-  `service` action as a systemd system unit, and L3 and L4. The privileged
+  `service` action as a systemd system unit, and L3 and L4 (L4 later moved to phase 7). The privileged
   helper (R13) applies actions as well as files.
 - **Phase 6 (upgrade)** follows D3a: parameters are gathered, the old
   uninstaller runs with `--upgrade`, and kept paths survive.
@@ -528,7 +529,8 @@ Each phase is one PR with its own desk check, as in spec 001.
      uninstall, with a pre-existing unit restored, and an uninstall hook
      that runs before any file goes.
    - **4b, system scope**, with spec 001 phase 5: the privileged helper
-     applies the actions, `service` as a system unit, and L4.
+     applies the actions, and `service` is a system unit, run as root as
+     the reference's service runs as LocalSystem. L4 moved to phase 7.
 5. **The experiment**, after spec 001 phase 7: a fynstall config that
    reproduces the reference installer on Windows, compared in a VM against
    a checklist made from [Context](#context). The comparison covers

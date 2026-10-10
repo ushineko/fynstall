@@ -35,8 +35,16 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 	fl.BoolVar(&removeLeftovers, "remove-leftovers", false, "also remove the files the program made in the directories the install created")
 	fl.BoolVar(&gui, "gui", false, "use the wizard")
 	fl.BoolVar(&cli, "cli", false, "use the command line")
+	applyUninstallFlag := fl.Bool("apply-uninstall", false, "used by the uninstaller itself: remove the install as root")
 	if err := fl.Parse(args); err != nil {
 		return exitUsage
+	}
+	if *applyUninstallFlag {
+		r, err := ownReceipt()
+		if err != nil {
+			return newHelperOut(e.Out).fail(err)
+		}
+		return applyUninstall(r, removeLeftovers, e)
 	}
 	if quiet {
 		yes = true
@@ -51,7 +59,7 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 	// --uninstall; in the window it skips the question.
 	md, err := chooseMode(modeInput{
 		wantGUI: gui, wantCLI: cli, available: guiAvailable, cliOnly: quiet,
-		interactive: e.Interactive, display: hasDisplay(e.Getenv),
+		interactive: e.Interactive, display: hasDisplay(e.Getenv), root: os.Geteuid() == 0,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintln(e.Err, err)
@@ -83,6 +91,9 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 		return uninstallGUI(r, yes, e.Getenv)
 	}
 
+	if needsElevation(r.Scope) {
+		return uninstallElevated(r, removeLeftovers, quiet, verbose, e)
+	}
 	unlock, err := engine.Lock(r.App.ID, r.Scope, e.Getenv)
 	if err != nil {
 		return problem(err.Error())
@@ -121,6 +132,58 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 		}
 	}
 	return code
+}
+
+// ownReceipt reads the receipt of the install this program is in.
+func ownReceipt() (*engine.Receipt, error) {
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find this program: %w", err)
+	}
+	return engine.ReadReceipt(engine.ReceiptPath(filepath.Dir(exe)))
+}
+
+// uninstallElevated is the command-line uninstall of a system install: the
+// removal runs in a helper as root, under sudo. The leftovers are listed,
+// or removed with --remove-leftovers, as in a per-user uninstall.
+func uninstallElevated(r *engine.Receipt, removeLeftovers, quiet, verbose bool, e Env) int {
+	report := reporter(e, verbose)
+	if quiet {
+		report = reporter(Env{Out: io.Discard, Err: e.Err}, false)
+	} else {
+		_, _ = fmt.Fprintln(e.Out, "This install is for everyone on this computer, so removing it needs an administrator.")
+		for _, h := range r.Hooks {
+			_, _ = fmt.Fprintf(e.Out, "Before removing anything, it runs %s\n", commandLine(h.Exec, h.Args))
+		}
+	}
+	args := []string{"--apply-uninstall"}
+	if removeLeftovers {
+		args = append(args, "--remove-leftovers")
+	}
+	h, err := startElevated(context.Background(), false, e.Getenv, e.Err, args, report)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.Err, "uninstall: %v\n", err)
+		return exitFail
+	}
+	left := h.next() // the helper keeps the leftovers when stdin closes
+	if err := h.finish(); err != nil {
+		_, _ = fmt.Fprintf(e.Err, "uninstall: %v\n", err)
+		return exitFail
+	}
+	if r.RefreshMenu {
+		refreshMenu(report)
+	}
+	if !quiet {
+		_, _ = fmt.Fprintf(e.Out, "Removed %s %s.\n", r.App.Name, r.App.Version)
+		printLeftovers(e, left, verbose)
+		for _, k := range r.Keep {
+			_, _ = fmt.Fprintf(e.Out, "Your data, if any, was left in %s.\n", k)
+		}
+	}
+	return exitOK
 }
 
 // shownLeftovers is how many leftovers are listed without --verbose.
@@ -166,9 +229,13 @@ func handOver(app manifest.App, self string, args []string, e Env, problem func(
 	if app.ID == "" {
 		return problem("this uninstaller is not inside an install, and does not know which program it belongs to")
 	}
+	// A per-user install first: it is the person's own.
 	ix, _, err := engine.ReadIndex(&manifest.Manifest{App: app}, "user", e.Getenv)
 	if errors.Is(err, fs.ErrNotExist) {
-		return problem(fmt.Sprintf("%s is not installed for this user, so there is nothing to remove.", app.Name))
+		ix, _, err = engine.ReadIndex(&manifest.Manifest{App: app}, "system", e.Getenv)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return problem(fmt.Sprintf("%s is not installed for this user or for everyone, so there is nothing to remove.", app.Name))
 	}
 	if err != nil {
 		return problem(err.Error())
