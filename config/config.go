@@ -254,6 +254,18 @@ type Desktop struct {
 	Args       []string `yaml:"args"`
 	Categories []string `yaml:"categories"`
 	Terminal   bool     `yaml:"terminal"`
+	// GenericName says what kind of program it is, such as "Wallpaper
+	// manager"; Keywords are what a launcher's search matches.
+	GenericName string   `yaml:"generic_name"`
+	Keywords    []string `yaml:"keywords"`
+	// StartupNotify tells the launcher the program signals when its
+	// window is up, so it shows a busy cursor until then. Not written when
+	// unset.
+	StartupNotify *bool `yaml:"startup_notify"`
+	// StartupWMClass matches the window to the entry on X11 and XWayland.
+	// The default is the entry's ID, which is the app ID for the main
+	// entry, and what Fyne sets as the window's class.
+	StartupWMClass string `yaml:"startup_wm_class"`
 }
 
 // MinIconSize is the smallest source icon accepted: the largest hicolor
@@ -356,6 +368,9 @@ func (c *Config) defaults() {
 	for i := range c.Integration.Desktop {
 		if c.Integration.Desktop[i].ID == "" {
 			c.Integration.Desktop[i].ID = c.App.ID
+		}
+		if c.Integration.Desktop[i].StartupWMClass == "" && !c.Integration.Desktop[i].Terminal {
+			c.Integration.Desktop[i].StartupWMClass = c.Integration.Desktop[i].ID
 		}
 	}
 }

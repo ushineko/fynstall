@@ -159,6 +159,12 @@ type Desktop struct {
 	Categories []string `json:"categories,omitempty"`
 	Terminal   bool     `json:"terminal,omitempty"`
 	Icon       bool     `json:"icon,omitempty"`
+	// GenericName, Keywords, StartupNotify and StartupWMClass go into the
+	// entry as written; StartupNotify is nil when the config did not say.
+	GenericName    string   `json:"generic_name,omitempty"`
+	Keywords       []string `json:"keywords,omitempty"`
+	StartupNotify  *bool    `json:"startup_notify,omitempty"`
+	StartupWMClass string   `json:"startup_wm_class,omitempty"`
 }
 
 // App identifies the program being installed.

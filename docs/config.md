@@ -164,6 +164,10 @@ name. If `{bin}` is not on the user's `PATH`, the installer says so.
 | `args` | no | Arguments after the program. |
 | `categories` | no | Launcher categories, such as `Utility`. |
 | `terminal` | no | `true` runs the program in a terminal. |
+| `generic_name` | no | What kind of program it is, such as `Wallpaper manager`. |
+| `keywords` | no | Words a launcher's search matches. |
+| `startup_notify` | no | `true` when the program tells the desktop its window is up, so the launcher shows it is starting. Left out when unset. |
+| `startup_wm_class` | no | The window class X11 and XWayland match to the entry. The default is the entry's `id`, which is what Fyne sets for the app ID; a `terminal` entry has none. |
 
 The program's main window needs an entry whose ID is the app ID. On
 Wayland, the compositor finds a window's icon through the desktop entry

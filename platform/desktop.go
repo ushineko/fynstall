@@ -37,6 +37,9 @@ func RenderDesktop(d manifest.Desktop, exec, icon, uninstall string) []byte {
 	line("Type", "Application")
 	line("Version", "1.5")
 	line("Name", escapeString(d.Name))
+	if d.GenericName != "" {
+		line("GenericName", escapeString(d.GenericName))
+	}
 	if d.Comment != "" {
 		line("Comment", escapeString(d.Comment))
 	}
@@ -53,6 +56,19 @@ func RenderDesktop(d manifest.Desktop, exec, icon, uninstall string) []byte {
 	line("Terminal", fmt.Sprint(d.Terminal))
 	if len(d.Categories) > 0 {
 		line("Categories", strings.Join(d.Categories, ";")+";")
+	}
+	if len(d.Keywords) > 0 {
+		kw := make([]string, len(d.Keywords))
+		for i, k := range d.Keywords {
+			kw[i] = escapeString(k)
+		}
+		line("Keywords", strings.Join(kw, ";")+";")
+	}
+	if d.StartupNotify != nil {
+		line("StartupNotify", fmt.Sprint(*d.StartupNotify))
+	}
+	if d.StartupWMClass != "" {
+		line("StartupWMClass", escapeString(d.StartupWMClass))
 	}
 	if uninstall != "" {
 		line("Actions", UninstallAction+";")
