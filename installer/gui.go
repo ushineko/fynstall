@@ -25,6 +25,7 @@ import (
 
 	"github.com/ushineko/fynstall/engine"
 	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/platform"
 )
 
 // guiAvailable is true in the full build, which has the wizard.
@@ -41,7 +42,9 @@ const RunUninstaller = "Run its uninstaller now"
 func installGUI(m *manifest.Manifest, p Payload, f installFlags, e Env) int {
 	g, err := newInstallWizard(m, p, f, e)
 	if err != nil {
+		// Started from the desktop, stderr goes nowhere: say it in a window.
 		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
+		notice(m.App.Name+" "+m.App.Version, "The installer cannot start: "+err.Error())
 		return exitFail
 	}
 	r := wizard.Run(g.options)
@@ -119,10 +122,14 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 		}
 		pages = append(pages, page)
 	}
-	if len(m.Scopes) > 1 && g.old == nil {
+	scopes, err := offeredScopes(m, e.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	if len(scopes) > 1 && g.old == nil {
 		pages = append(pages, &scopePage{g: g})
 	}
-	for _, scope := range m.Scopes {
+	for _, scope := range scopes {
 		if g.old != nil {
 			break // a new version goes where the old one is
 		}
@@ -361,7 +368,7 @@ func (r *replacePage) Build(w *wizard.Wizard) fyne.CanvasObject {
 	box.Add(widget.NewSeparator())
 	box.Add(container.NewHBox(widget.NewButton(UninstallInstead, func() {
 		g.uninstalling = true
-		start(g.existing.Uninstaller, "--gui")
+		start(g.existing.Uninstaller, true, "--gui")
 		w.Cancel()
 	})))
 	return box
@@ -372,6 +379,30 @@ const (
 	ForMe       = "Just me"
 	ForEveryone = "Everyone on this computer (asks for an administrator)"
 )
+
+// offeredScopes are the scopes of m that this platform installs in. A
+// config offers the same scopes on every platform; one that a platform's
+// backend does not have yet is left out, as the command line leaves it out
+// unless it is asked for by name.
+func offeredScopes(m *manifest.Manifest, getenv func(string) string) ([]string, error) {
+	var out []string
+	var last error
+	for _, scope := range m.Scopes {
+		_, err := platform.Vars(scope, getenv)
+		switch {
+		case errors.Is(err, platform.ErrScopeUnavailable):
+			last = err
+		case err != nil:
+			return nil, fmt.Errorf("resolve paths: %w", err)
+		default:
+			out = append(out, scope)
+		}
+	}
+	if len(out) == 0 {
+		return nil, last
+	}
+	return out, nil
+}
 
 // scopePage asks who the install is for, when the config offers both.
 type scopePage struct {
@@ -504,20 +535,25 @@ func (g *installWizard) after(r wizard.Result) int {
 	}
 	if g.existing != nil {
 		if r.Checks[RunUninstaller] {
-			start(g.existing.Uninstaller, "--gui")
+			start(g.existing.Uninstaller, true, "--gui")
 		}
 		return exitOK
 	}
 	if g.launch != nil && r.Checks[LaunchNow] {
-		start(filepath.Join(g.plan.Root, filepath.FromSlash(g.m.Launch)))
+		start(filepath.Join(g.plan.Root, filepath.FromSlash(g.m.Launch)), false)
 	}
 	return exitOK
 }
 
 // start runs a program and does not wait for it: the installer exits and
-// the program goes on.
-func start(path string, args ...string) {
+// the program goes on. ours is true for a program of fynstall's, which
+// shows a window and needs no console; the app's own program gets what
+// Windows gives it.
+func start(path string, ours bool, args ...string) {
 	cmd := exec.CommandContext(context.Background(), path, args...) // #nosec G204 -- a path this install wrote, or its index recorded
+	if ours {
+		platform.Background(cmd)
+	}
 	if err := cmd.Start(); err == nil {
 		_ = cmd.Process.Release()
 	}

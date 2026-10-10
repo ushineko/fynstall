@@ -58,10 +58,10 @@ which shows the desktop's password dialog) or `sudo` (on the command line).
 
 ## Windows
 
-Windows has per-user installs from the command line, with a Start Menu
-shortcut, an entry in Settings > Apps and an entry on `PATH`. The wizard, an
-install for everyone on the computer and services follow in spec 001
-phase 7.
+Windows has per-user installs, from the wizard and from the command line,
+with a Start Menu shortcut, an entry in Settings > Apps and an entry on
+`PATH`. An install for everyone on the computer and services follow in
+spec 001 phase 7.
 
 ### Paths
 
@@ -88,12 +88,39 @@ of `LOCALAPPDATA` or `APPDATA` is ignored.
 Windows has no directory of links, so there is no `{bin}`. A template that
 names `{bin}` fails with "no value for {bin}".
 
-A full installer, with the wizard, does not build for a Windows target yet.
-`fynstall build --cli-only --target windows/amd64` builds from Linux and
-from Windows, with no C compiler.
+A full installer, with the wizard, builds on Windows for Windows and needs a
+C compiler (`gcc` on `PATH`, as MSYS2 provides). `fynstall build --cli-only
+--target windows/amd64` builds from Linux and from Windows, with no C
+compiler.
 
-An installer that offers both scopes installs per-user on Windows.
-`--scope system` stops and says that the scope is not available.
+An installer that offers both scopes installs per-user on Windows: the
+wizard does not ask who the install is for, and `--scope system` stops and
+says that the scope is not available.
+
+### The wizard or the command line
+
+The installer is a console program, so that its command line prints and
+asks in `cmd` and PowerShell like any other. It chooses its front end by who
+started it:
+
+- **From Explorer, the Start Menu or Settings**, Windows makes a console for
+  the program alone. The installer sees that it is alone on its console,
+  closes the console and opens the wizard. The console window shows for a
+  moment first.
+- **From a console**, the shell shares its console with the installer, and
+  the installer runs on the command line. `--gui` opens the wizard from
+  there.
+- **Over SSH or as a service** there is no desktop, and the installer runs
+  on the command line and asks nothing.
+- **As an administrator** (an elevated console, or "Run as administrator")
+  the installer runs on the command line, and `--gui` is refused: the window
+  does not run with an administrator's rights.
+
+The uninstaller chooses the same way. The Uninstall button in Settings >
+Apps opens its window, which asks once.
+
+A problem found before the wizard can open is shown in a small window, as a
+program started from the desktop has no console to print it on.
 
 ### The Start Menu, Settings and PATH
 

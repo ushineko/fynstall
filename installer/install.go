@@ -67,10 +67,9 @@ func Install(args []string, p Payload, e Env) int {
 	if f.scope == "" {
 		f.scope = m.Scopes[0]
 	}
-	md, err := chooseMode(modeInput{
-		wantGUI: f.gui, wantCLI: f.cli, available: guiAvailable,
-		cliOnly:     f.yes || f.dryRun || f.uninstall || f.forceReceipt,
-		interactive: e.Interactive, display: hasDisplay(e.Getenv), root: os.Geteuid() == 0,
+	md, err := e.modeFor(modeInput{
+		wantGUI: f.gui, wantCLI: f.cli,
+		cliOnly: f.yes || f.dryRun || f.uninstall || f.forceReceipt,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintln(e.Err, err)
@@ -390,6 +389,7 @@ func delegate(ix *engine.Index, yes bool, e Env) int {
 	// worse than letting it finish, and it may be waiting on a person.
 	cmd := exec.CommandContext(context.Background(), ix.Uninstaller, args...) // #nosec G204 -- the path is the one this app's own install recorded
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = e.In, e.Out, e.Err
+	platform.Background(cmd)
 	err := cmd.Run()
 	var exit *exec.ExitError
 	switch {

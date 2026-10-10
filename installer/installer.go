@@ -45,6 +45,24 @@ type Env struct {
 	// OutTerminal is true when Out is a terminal, where a progress line
 	// can be redrawn in place.
 	OutTerminal bool
+	// OwnConsole is true when the terminal is a console Windows made for
+	// this process alone: the program was started from the desktop, not
+	// typed into a shell (spec 001 R19).
+	OwnConsole bool
+}
+
+// modeFor chooses the front end for this process, and closes the console
+// that Windows made for a program which then shows a window.
+func (e Env) modeFor(in modeInput) (mode, error) {
+	in.available = guiAvailable
+	in.interactive = e.Interactive && !e.OwnConsole
+	in.display = hasDisplay(e.Getenv)
+	in.root = privileged()
+	md, err := chooseMode(in)
+	if err == nil && md == modeGUI && e.OwnConsole {
+		releaseConsole()
+	}
+	return md, err
 }
 
 // Main runs the installer with the process's arguments and exits.
@@ -62,6 +80,7 @@ func processEnv() Env {
 	e := Env{
 		In: os.Stdin, Out: os.Stdout, Err: os.Stderr, Getenv: os.Getenv,
 		Interactive: isTerminal(os.Stdin), OutTerminal: isTerminal(os.Stdout),
+		OwnConsole: ownConsole(),
 	}
 	if exe, err := os.Executable(); err == nil {
 		if exe, err = filepath.EvalSymlinks(exe); err == nil {

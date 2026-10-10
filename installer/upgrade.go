@@ -102,6 +102,7 @@ func oldUninstallArgs(ctx context.Context, path string) []string {
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, path, "-h") // #nosec G204 -- the uninstaller the install recorded
 	cmd.Stdout, cmd.Stderr = &out, &out
+	platform.Background(cmd)
 	_ = cmd.Run() // -h exits 2
 	if strings.Contains(out.String(), "-upgrade") {
 		return []string{"--upgrade", "--verbose"}
@@ -113,6 +114,7 @@ func oldUninstallArgs(ctx context.Context, path string) []string {
 // reports its output.
 func runOldUninstaller(ctx context.Context, path string, report engine.Reporter) error {
 	cmd := exec.CommandContext(ctx, path, oldUninstallArgs(ctx, path)...) // #nosec G204 -- the uninstaller the install recorded
+	platform.Background(cmd)
 	r, w := io.Pipe()
 	cmd.Stdout, cmd.Stderr = w, w
 	var wg sync.WaitGroup

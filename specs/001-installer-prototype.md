@@ -780,8 +780,69 @@ Phase 7b:
       `HKCU\Environment` and of the Uninstall key before the install and
       after the uninstall are identical (`fc`).
 
+Phase 7c comes in two parts: the wizard and mode selection (this part),
+then the helper under UAC with system scope.
+
+Chosen for the first part of 7c (2026-10-10), for the maintainer to confirm
+in the PR. Neither the config format nor the receipt changes.
+
+- The installer stays a console program, as the risk "Windows console
+  flash" accepts. Mode selection is R19: a process that is alone on its
+  console was started from the desktop, opens the wizard and closes the
+  console. The console's existence no longer means a person typed the
+  command, so `Env.OwnConsole` takes it out of "interactive" for the
+  choice, and leaves it in for a command line that was asked for with
+  `--cli`.
+- "A display" on Windows is a window station with a visible desktop, which
+  a service and a session over SSH do not have.
+- "Root" on Windows is an elevated process. An elevated installer uses the
+  command line and refuses `--gui`, as the carried criterion says. On a
+  machine where every process of the person is elevated (UAC off), the
+  wizard is never offered; that is the cost of the rule.
+- A program that the installer starts and waits for (the installed
+  uninstaller, a `run` action) gets no console window of its own when the
+  installer has none (`CREATE_NO_WINDOW`). With a console it shares the
+  installer's, as before.
+- The wizard offers the scopes this platform's backend has. Until the
+  second part there is one on Windows, so the wizard does not ask who the
+  install is for. A desk run found the alternative: with `examples/hello`,
+  which offers both scopes, the wizard failed to resolve the system paths
+  and the installer exited with nothing shown.
+- A failure before the wizard opens is shown in a window on every
+  platform. The same run found that it went only to stderr, which a program
+  started from the desktop does not have.
+- A full installer for Windows builds on Windows only, with `gcc` on
+  `PATH`. A full build from Linux with `x86_64-w64-mingw32-gcc` (R18) is not
+  wired in: the rule "a full installer builds only for this machine" still
+  refuses it, and nothing here was able to try it.
+
+Phase 7c, first part:
+
+- [x] `fynstall build` on Windows makes the full installer and uninstaller,
+      which link the graphics library, carry the icon through the C linker
+      as through the Go linker, and install from a script with `--yes`
+      (`TestAFullInstallerInstallsFromTheCommandLineToo`).
+- [x] `UninstallString` of a full build opens the uninstaller's window
+      (`--gui`), and `QuietUninstallString` does not (the same test, and
+      `TestTheWizardInstallsWithItsParameters`).
+- [x] The wizard installs, uninstalls, lists leftovers and replaces an
+      installed version on Windows, against the real engine and a registry
+      root of the test's own: the tests of `installer/gui_test.go` run on
+      both platforms, and compare the registry with the files.
+- [x] The wizard offers only the scopes the platform has
+      (`TestTheWizardAsksWhoTheInstallIsFor`).
+- [x] Mode selection for an administrator (`TestChooseMode`).
+- [ ] Desk check on Windows 11: a double-click on the full installer opens
+      the wizard and leaves no console window; the wizard installs and the
+      finish page starts the program; Uninstall in Settings > Apps opens
+      the uninstaller's window and removes the program; from `cmd` and
+      PowerShell the installer runs on the command line and asks its
+      questions; an elevated console gets the command line and a refusal of
+      `--gui`.
+
 The whole of phase 7:
 
+A
 - [ ] `fynstall build --target windows/amd64` from Linux produces an `.exe`
       with the icon embedded as a resource.
 - [ ] Desk check in the win11-kvm VM. Double-click opens the wizard with no
@@ -995,6 +1056,28 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 7c, first part (2026-10-10)
+
+Same machine as 7a and 7b. `go test -race ./...` passes, and golangci-lint
+v2.12.2 reports 0 issues. The CLI-only code and tests compile for Linux.
+The wizard's code and `installer/gui_test.go` need cgo and were not
+compiled for Linux here; that file changed (paths through `platform.Vars`,
+a registry snapshot that is empty on Linux), so `make test` on Linux is the
+first check of it.
+
+By hand, with the full installer of `examples/hello`:
+
+- Started as Explorer starts a program (through the desktop's shell, not
+  elevated, with a console of its own): one process, one visible window
+  titled "Hello 0.1.0", no console host left under it, and the window
+  closed on request. Nothing was installed. Before the fix described in
+  the phase list, the same start exited at once with nothing shown.
+- From an elevated console: `--dry-run` listed the plan, and `--gui`
+  exited 2 with "the window does not run as an administrator".
+
+Not done: nobody has looked at the wizard's pages on Windows or clicked
+through an install. The desk check in the phase list covers that.
 
 ### Phase 7b (2026-10-10)
 

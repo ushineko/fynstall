@@ -376,8 +376,9 @@ What the wizard shows.
 
 A list of `os/arch` pairs. Without it, and without `--target`, the build is
 for the machine that runs it. The known targets are `linux/amd64`,
-`linux/arm64` and `windows/amd64`. A Windows target builds with `--cli-only`
-only; the wizard on Windows comes later in spec 001 phase 7.
+`linux/arm64` and `windows/amd64`. An installer with the wizard builds only
+on its own platform, with a C compiler; `--cli-only` builds every target
+from any of them.
 
 The build makes one installer per target, each with the payload for its
 target, and records the target in the installer's manifest.

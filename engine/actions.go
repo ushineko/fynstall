@@ -318,6 +318,7 @@ const outputTail = 10
 func runProgram(ctx context.Context, path, dir string, args, env []string, report Reporter) error {
 	cmd := exec.CommandContext(ctx, path, args...) // #nosec G204 -- a payload program the config declares, shown before it runs
 	cmd.Dir = dir
+	platform.Background(cmd)
 	if env != nil {
 		cmd.Env = append(os.Environ(), env...)
 	}

@@ -15,8 +15,9 @@ delivered in phases; this README changes as each phase lands.
 Linux installers, per-user, with a wizard and a command line, launcher
 entries, icons, links on `PATH`, parameters and configuration files, and
 system-wide installs and upgrades. On Windows: per-user installs from the
-command line, with a Start Menu shortcut, an entry in Settings > Apps and
-an entry on `PATH`. The wizard and system-wide installs on Windows follow.
+wizard and the command line, with a Start Menu shortcut, an entry in
+Settings > Apps and an entry on `PATH`. System-wide installs on Windows
+follow.
 
 ## Using it
 
@@ -108,6 +109,15 @@ MIT. See [LICENSE](LICENSE).
 ## Changelog
 
 ### Unreleased
+
+- The wizard on Windows (spec 001 phase 7c): `fynstall build` on Windows
+  makes the full installer and uninstaller. Started from Explorer, the
+  Start Menu or Settings > Apps they open their window and close the
+  console Windows made for them; typed into a console they run on the
+  command line (R19). An installer run as an administrator uses the command
+  line. A problem found before the wizard opens is shown in a window, on
+  Linux too. The wizard offers only the scopes the platform has
+  ([#1](https://github.com/ushineko/fynstall/issues/1)).
 
 - `{programs}` and the icon of the installer on Windows (spec 001 phase
   7b): the new placeholder `{programs}` is where the platform keeps

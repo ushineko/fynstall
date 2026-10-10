@@ -47,6 +47,7 @@ var (
 	greet020  builder.Artifact // app version 0.2.0: an upgrade
 	twoScopes builder.Artifact // a config that offers user and system scope
 	shell     builder.Artifact // a launcher entry, an icon, a link and a publisher
+	shellFull builder.Artifact // the same, with the wizard
 	setupFail error
 )
 
@@ -164,8 +165,22 @@ func setup(work string) error {
 	if err := os.WriteFile(filepath.Join(dir, "fynstall.yaml"), []byte(cfg), 0o600); err != nil {
 		return err
 	}
-	shell, err = one(filepath.Join(dir, "fynstall.yaml"), v1, "shell-dist")
-	return err
+	if shell, err = one(filepath.Join(dir, "fynstall.yaml"), v1, "shell-dist"); err != nil {
+		return err
+	}
+	// The same with the wizard, which needs cgo and so a C compiler.
+	if gcc, _ := exec.LookPath("gcc"); gcc == "" {
+		return nil
+	}
+	full, err := builder.Build(context.Background(), builder.Options{
+		Config: filepath.Join(dir, "fynstall.yaml"), OutDir: filepath.Join(work, "shell-full"), Targets: []string{windows},
+		RuntimePath: repo, RuntimeVersion: v1, Env: []string{"GOPROXY=off"},
+	})
+	if err != nil {
+		return err
+	}
+	shellFull = full[0]
+	return nil
 }
 
 func copyFile(from, to string) error {
@@ -544,6 +559,45 @@ func TestAnInstallIsInTheStartMenuInSettingsAndOnPath(t *testing.T) {
 	require.Equal(t, 0, code, out)
 	require.Empty(t, out, "--quiet prints only problems")
 	require.Equal(t, before, h.snap(t), "the files, the shortcut and the registry")
+}
+
+// The full installer has the wizard, and from a script it is the same
+// command line. What Settings > Apps runs opens the uninstaller's window.
+func TestAFullInstallerInstallsFromTheCommandLineToo(t *testing.T) {
+	require.NoError(t, setupFail)
+	if shellFull.Installer == "" {
+		t.Skip("no C compiler on PATH: the wizard needs cgo")
+	}
+	require.True(t, shellFull.GUI)
+	f, err := pe.Open(shellFull.Installer)
+	require.NoError(t, err)
+	syms, err := f.ImportedSymbols()
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	var graphics bool
+	for _, s := range syms {
+		_, lib, _ := strings.Cut(s, ":")
+		graphics = graphics || strings.EqualFold(lib, "opengl32.dll")
+	}
+	require.True(t, graphics, "the full installer links the graphics library the window draws with")
+
+	h := newHome(t, "io.example.shell")
+	before := h.snap(t)
+	code, out := h.run(t, shellFull.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	uninstall := `"` + h.uninstaller() + `"`
+	require.Equal(t, uninstall+" --gui", h.value(t, shellUninstallKey, "UninstallString"))
+	require.Equal(t, uninstall+" --quiet", h.value(t, shellUninstallKey, "QuietUninstallString"))
+	ico, err := os.ReadFile(filepath.Join(h.root, ".fynstall", "app.ico"))
+	require.NoError(t, err)
+	// The C linker places the icon as the Go linker does.
+	for _, p := range []string{shellFull.Installer, h.uninstaller()} {
+		builder.RequireIcon(t, ico, builder.ReadResources(t, p))
+	}
+
+	code, out = h.run(t, h.uninstaller(), "--quiet")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
 }
 
 // A shortcut and a PATH that were there before are as they were after.
