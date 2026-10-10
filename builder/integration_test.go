@@ -50,6 +50,7 @@ var (
 	v1Art      builder.Artifact
 	v1Again    builder.Artifact
 	v2Art      builder.Artifact
+	hello020   builder.Artifact // app version 0.2.0, without the README: an upgrade
 	setupFail  error
 )
 
@@ -107,6 +108,9 @@ func setup(work string) error {
 	if v2Art, err = build(v2, "v2"); err != nil {
 		return err
 	}
+	if hello020, err = buildHello020(src, work, repo); err != nil {
+		return err
+	}
 	// The full variant needs cgo and Fyne, as examples/hello itself does.
 	arts, err := builder.Build(context.Background(), builder.Options{
 		Config: filepath.Join(src, "fynstall.yaml"), OutDir: filepath.Join(work, "full"),
@@ -123,6 +127,45 @@ func setup(work string) error {
 		return err
 	}
 	return setupGreet(repo, work)
+}
+
+// buildHello020 builds Hello at app version 0.2.0 from a copy of src whose
+// config drops the README from the payload: the upgrade every R17 test
+// installs over 0.1.0.
+func buildHello020(src, work, repo string) (builder.Artifact, error) {
+	dir := filepath.Join(work, "hello-0.2.0")
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o750); err != nil {
+		return builder.Artifact{}, err
+	}
+	for _, f := range []string{"hello.png", "LICENSE", "bin/hello"} {
+		b, err := os.ReadFile(filepath.Join(src, filepath.FromSlash(f)))
+		if err != nil {
+			return builder.Artifact{}, err
+		}
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(f)), b, 0o700); err != nil { // #nosec G306 -- bin/hello must run
+			return builder.Artifact{}, err
+		}
+	}
+	cfg, err := os.ReadFile(filepath.Join(src, "fynstall.yaml"))
+	if err != nil {
+		return builder.Artifact{}, err
+	}
+	s := strings.Replace(string(cfg), "version: 0.1.0", "version: 0.2.0", 1)
+	s = strings.Replace(s, "  - src: README.md\n    dst: share/doc/README.md\n", "", 1)
+	if s == string(cfg) || strings.Contains(s, "README.md") && strings.Contains(s, "share/doc") {
+		return builder.Artifact{}, errors.New("the hello config changed shape; update buildHello020")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fynstall.yaml"), []byte(s), 0o600); err != nil {
+		return builder.Artifact{}, err
+	}
+	arts, err := builder.Build(context.Background(), builder.Options{
+		Config: filepath.Join(dir, "fynstall.yaml"), OutDir: filepath.Join(work, "hello-0.2.0-dist"),
+		CLIOnly: true, RuntimePath: repo, RuntimeVersion: v1, Env: []string{"GOPROXY=off"},
+	})
+	if err != nil {
+		return builder.Artifact{}, err
+	}
+	return arts[0], nil
 }
 
 // setupBeacon builds examples/beacon, pure Go, and its CLI-only installer.
@@ -321,13 +364,16 @@ func TestANewerInstallerRemovesThroughTheInstalledUninstaller(t *testing.T) {
 	code, out := h.run(t, v1Art.Installer, "--yes")
 	require.Equal(t, 0, code, out)
 
-	code, out = h.run(t, v2Art.Installer, "--yes")
-	require.Equal(t, 1, code, "a second install is refused, not layered over the first")
-	require.Contains(t, out, "--uninstall")
+	// The same app version again is a repair (R17), and it removes the
+	// install through the installed uninstaller, not its own engine.
+	code, out = h.run(t, v2Art.Installer, "--yes", "--verbose")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "Repairs Hello 0.1.0")
+	require.Contains(t, out, "fynstall uninstaller "+v1, "the v1 uninstaller ran (R9e)")
 
 	code, out = h.run(t, v2Art.Installer, "--uninstall", "--yes")
 	require.Equal(t, 0, code, out)
-	require.Contains(t, out, "fynstall uninstaller "+v1, "the v1 uninstaller ran, not v2's engine (R9e)")
+	require.Contains(t, out, "fynstall uninstaller "+v2, "--uninstall runs the installed uninstaller, which the repair installed (R9e)")
 	require.Equal(t, before, h.snap(t))
 }
 

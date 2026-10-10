@@ -36,6 +36,9 @@ type request struct {
 	Root   string            `json:"root"`
 	Params map[string]string `json:"params,omitempty"`
 	Digest string            `json:"digest"`
+	// Upgrade is true when the plan replaces the install in Scope (R17):
+	// the helper runs its uninstaller first.
+	Upgrade bool `json:"upgrade,omitempty"`
 }
 
 // wire is an event on the helper's stdout.
@@ -275,7 +278,7 @@ func applyRequest(ctx context.Context, plan *engine.Plan, gui bool, e Env, repor
 	if err != nil {
 		return err
 	}
-	file, cleanup, err := writeRequest(request{Scope: plan.Scope, Root: plan.Root, Params: plan.Params, Digest: digest})
+	file, cleanup, err := writeRequest(request{Scope: plan.Scope, Root: plan.Root, Params: plan.Params, Digest: digest, Upgrade: plan.Replaces != ""})
 	if err != nil {
 		return err
 	}
@@ -294,12 +297,34 @@ func applyPlan(file string, m *manifest.Manifest, p Payload, e Env) int {
 	if err := json.Unmarshal(b, &req); err != nil {
 		return out.fail(fmt.Errorf("read the plan: %w", err))
 	}
-	unlock, err := engine.Lock(m.App.ID, req.Scope, e.Getenv)
+	l, err := takeLock(m.App.ID, req.Scope, e.Getenv)
 	if err != nil {
 		return out.fail(err)
 	}
-	defer unlock()
-	plan, err := engine.NewPlan(m, engine.Options{Scope: req.Scope, Root: req.Root, Env: e.Getenv, Uninstaller: p.Uninstaller, Params: req.Params})
+	defer l.Release()
+	o := engine.Options{Scope: req.Scope, Root: req.Root, Env: e.Getenv, Uninstaller: p.Uninstaller, Params: req.Params}
+	var old *installed
+	if req.Upgrade {
+		ix, _, err := engine.ReadIndex(m, req.Scope, e.Getenv)
+		if err == nil {
+			old, err = readExisting(ix)
+		}
+		if err != nil {
+			return out.fail(fmt.Errorf("find the installed version: %w", err))
+		}
+		o.Replacing = old.receipt
+		if o.Params == nil {
+			o.Params = map[string]string{}
+		}
+		// The secrets the person's process could not read, read as root.
+		previous, _ := engine.Previous(m, old.receipt, e.Getenv)
+		for _, d := range m.Parameters {
+			if v, ok := previous[d.Name]; ok && d.Secret && o.Params[d.Name] == "" {
+				o.Params[d.Name] = v
+			}
+		}
+	}
+	plan, err := engine.NewPlan(m, o)
 	if err != nil {
 		return out.fail(err)
 	}
@@ -312,7 +337,11 @@ func applyPlan(file string, m *manifest.Manifest, p Payload, e Env) int {
 	}
 	ctx, cancel := cancelOnEOF(e.In)
 	defer cancel()
-	if _, err := engine.Apply(ctx, plan, p.Files, p.Uninstaller, out.report); err != nil {
+	if old != nil {
+		if err := replace(ctx, plan, old, p, e.Getenv, l, out.report); err != nil {
+			return out.fail(err)
+		}
+	} else if _, err := engine.Apply(ctx, plan, p.Files, p.Uninstaller, out.report); err != nil {
 		return out.fail(fmt.Errorf("install failed, and the changes were undone: %w", err))
 	}
 	out.send(wire{Kind: "done"})
@@ -323,18 +352,20 @@ func applyPlan(file string, m *manifest.Manifest, p Payload, e Env) int {
 // the install r. With removeLeftovers it removes the leftovers too;
 // otherwise it reports them and waits for the parent's answer, so the
 // person is asked once for an administrator, not twice.
-func applyUninstall(r *engine.Receipt, removeLeftovers bool, e Env) int {
+func applyUninstall(r *engine.Receipt, removeLeftovers bool, why engine.Reason, e Env) int {
 	out := newHelperOut(e.Out)
 	unlock, err := engine.Lock(r.App.ID, r.Scope, e.Getenv)
 	if err != nil {
 		return out.fail(err)
 	}
 	defer unlock()
-	left, err := engine.Uninstall(r, out.report)
+	left, err := engine.Uninstall(r, why, out.report)
 	if err != nil {
 		return out.fail(err)
 	}
-	if len(left) > 0 && !removeLeftovers {
+	// An upgrade leaves the leftovers where they are, without asking: the
+	// new version installs among them.
+	if len(left) > 0 && !removeLeftovers && why != engine.ReasonUpgrade {
 		out.send(wire{Kind: "leftovers", Leftovers: left})
 		line, _ := bufio.NewReader(e.In).ReadString('\n')
 		removeLeftovers = strings.TrimSpace(line) == answerRemove

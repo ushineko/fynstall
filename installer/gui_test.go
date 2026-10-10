@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -322,6 +323,59 @@ func TestTheUninstallWindowKeepsItsHelperForTheAnswer(t *testing.T) {
 			w.Act()
 			done()
 			require.Contains(t, w.Message(), c.want)
+		})
+	}
+}
+
+// With the app installed, the first page says what this installer does to
+// it (R17), and a downgrade waits for its check.
+func TestTheWizardSaysWhatItDoesToAnInstalledVersion(t *testing.T) {
+	for _, c := range []struct {
+		installed, title, says string
+		confirm                bool
+	}{
+		{"0.0.9", "Upgrade", "Upgrades Hello 0.0.9 to 0.1.0", false},
+		{"0.1.0", "Repair", "Repairs Hello 0.1.0", false},
+		{"0.2.0", "Downgrade", "Replaces Hello 0.2.0 with the older 0.1.0", true},
+	} {
+		t.Run(c.title, func(t *testing.T) {
+			m, p, e, _ := guiFixture(t)
+			m.Parameters, m.ConfigFiles, m.Licence = nil, nil, ""
+			old := *m
+			old.App.Version = c.installed
+			plan, err := engine.NewPlan(&old, engine.Options{Env: e.Getenv, Uninstaller: p.Uninstaller})
+			require.NoError(t, err)
+			_, err = engine.Apply(context.Background(), plan, p.Files, p.Uninstaller, nil)
+			require.NoError(t, err)
+
+			g, err := newInstallWizard(m, p, installFlags{scope: "user"}, e)
+			require.NoError(t, err)
+			titles := []string{}
+			for _, pg := range g.options.Pages {
+				titles = append(titles, pg.Title())
+			}
+			require.Equal(t, []string{c.title, "Ready", "Installing", "Done"}, titles, "no location: a new version goes where the old one is")
+			w := wizard.Headless(fynetest.App(t), g.options)
+			var text []string
+			for _, l := range fynetest.All[*widget.Label](w.Content()) {
+				text = append(text, l.Text)
+			}
+			require.Contains(t, strings.Join(text, "\n"), c.says)
+			require.NotNil(t, fynetest.FindButton(w.Content(), UninstallInstead))
+			checks := fynetest.All[*widget.Check](w.Content())
+			if !c.confirm {
+				require.Empty(t, checks)
+				w.Next()
+				require.Equal(t, "Ready", w.Current().Title())
+				require.Equal(t, plan.Root, g.plan.Root)
+				return
+			}
+			w.Next()
+			require.Equal(t, "Downgrade", w.Current().Title(), "a downgrade waits for its check")
+			require.Len(t, checks, 1)
+			checks[0].SetChecked(true)
+			w.Next()
+			require.Equal(t, "Ready", w.Current().Title())
 		})
 	}
 }

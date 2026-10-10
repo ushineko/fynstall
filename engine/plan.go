@@ -98,6 +98,10 @@ type Plan struct {
 	RefreshMenu bool
 	// Params are the parameter values the install was planned with.
 	Params map[string]string
+	// Replaces is the version of the install this one replaces, or "".
+	Replaces string
+	// gone are the paths the replaced install's uninstaller removes.
+	gone map[string]bool
 }
 
 // Options are the choices a front end passes to NewPlan.
@@ -112,6 +116,13 @@ type Options struct {
 	// Params are the parameter values, already resolved by the front end
 	// from flags, the side file, a person or the defaults.
 	Params map[string]string
+	// Replacing is the receipt of the install this one replaces (R17). The
+	// plan is then the one for after its uninstaller has run: what that
+	// install created counts as gone, and its index entry is no obstacle.
+	Replacing *Receipt
+	// Replaces is the version an upgrade, repair or downgrade replaces,
+	// for the steps a front end shows. Replacing sets it too.
+	Replaces string
 }
 
 // ErrInstalled is returned by NewPlan when the index already has this app.
@@ -132,7 +143,11 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Plan{Manifest: m, Scope: o.Scope}
+	p := &Plan{Manifest: m, Scope: o.Scope, Replaces: o.Replaces}
+	if o.Replacing != nil {
+		p.Replaces = o.Replacing.App.Version
+		p.gone = gone(o.Replacing)
+	}
 
 	root := o.Root
 	if root == "" {
@@ -146,10 +161,10 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	}
 	p.Root = filepath.Clean(root)
 	p.Index = indexPath(vars, m.App.ID)
-	if _, err := os.Lstat(p.Index); err == nil {
+	if _, err := os.Lstat(p.Index); err == nil && !p.gone[p.Index] {
 		return nil, fmt.Errorf("%s %w (index %s)", m.App.Name, ErrInstalled, p.Index)
 	}
-	if _, err := os.Lstat(filepath.Join(p.Root, MetaDir)); err == nil {
+	if _, err := os.Lstat(filepath.Join(p.Root, MetaDir)); err == nil && !p.gone[filepath.Join(p.Root, MetaDir)] {
 		return nil, fmt.Errorf("%s already holds a fynstall install that is not in the index; remove it first", p.Root)
 	}
 	for _, k := range m.KeepOnUninstall {
@@ -202,7 +217,7 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 			dirs = append(dirs, filepath.Dir(a.Migrate.To))
 		}
 	}
-	if p.Dirs, err = missingDirs(dirs); err != nil {
+	if p.Dirs, err = missingDirs(dirs, p.gone); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -321,6 +336,12 @@ func (p *Plan) addFile(pf PlannedFile) error {
 // check holds dst inside base and reports whether something is there
 // already. A directory in the way is an error.
 func (p *Plan) check(dst, base string) (bool, error) {
+	if p.gone[dst] {
+		// The replaced install's uninstaller removes what is there, which
+		// may be its own link pointing elsewhere: only the directory it
+		// goes in must stay inside base.
+		return false, Contained(base, filepath.Dir(dst))
+	}
 	if err := Contained(base, dst); err != nil {
 		return false, err
 	}
@@ -376,16 +397,35 @@ func resolve(p string) (string, error) {
 	}
 }
 
+// gone is what r's uninstaller removes: the paths it created, its own
+// directories and records, but not what it puts back.
+func gone(r *Receipt) map[string]bool {
+	out := map[string]bool{ReceiptPath(r.Root): true, r.Index: true}
+	for _, e := range r.Journal {
+		if kept(e.Path, r.Keep) {
+			continue
+		}
+		switch {
+		case e.Op == OpCreate, e.Op == OpMkdir, e.Op == OpService && e.Backup == "" && e.OldLink == "":
+			out[e.Path] = true
+		}
+	}
+	return out
+}
+
 // missingDirs returns each directory in dirs, and each of their ancestors,
-// that does not exist, parents first. Something that exists and is not a
-// directory is an error.
-func missingDirs(dirs []string) ([]string, error) {
+// that does not exist or is gone, parents first. Something that exists and
+// is not a directory is an error.
+func missingDirs(dirs []string, gone map[string]bool) ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
 	for _, d := range dirs {
 		for d = filepath.Clean(d); !seen[d]; d = filepath.Dir(d) {
 			seen[d] = true
 			fi, err := os.Stat(d)
+			if gone[d] {
+				err = fs.ErrNotExist
+			}
 			if err == nil {
 				if !fi.IsDir() {
 					return nil, fmt.Errorf("%s is not a directory", d)

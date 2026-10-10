@@ -64,9 +64,17 @@ type installWizard struct {
 	plan    *engine.Plan
 	planErr error
 	launch  *widget.Check
-	// existing is the index entry of an install already there.
+	// existing is the index entry of an install already there, and old
+	// its receipt when it can be read: then this install replaces it.
 	existing *engine.Index
+	old      *installed
 	uninst   *widget.Check
+	// previous are the values the installed version was given; deferred
+	// the secrets among them only the privileged helper can read.
+	previous map[string]string
+	deferred []string
+	// uninstalling is true when the person chose "Uninstall instead".
+	uninstalling bool
 }
 
 // newInstallWizard builds the pages from the manifest (spec 001 phase 4):
@@ -79,17 +87,28 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 		Name:  m.App.Name + " " + m.App.Version,
 		Icon:  icon(m, p.Files),
 	}
-	ix, _, err := engine.ReadIndex(m, f.scope, e.Getenv)
-	switch {
-	case err == nil:
-		g.existing = ix
-		g.options.Pages = g.installedPages()
-		return g, nil
-	case !errors.Is(err, fs.ErrNotExist):
+	ix, err := findExisting(m, f.scope, e.Getenv)
+	if err != nil {
 		return nil, err
 	}
-
-	pages := []wizard.Page{wizard.Welcome("Welcome", g.welcome())}
+	var pages []wizard.Page
+	if ix != nil {
+		g.existing = ix
+		if g.old, err = readExisting(ix); err != nil {
+			// Without its record there is nothing to replace it from: the
+			// window says so and offers its uninstaller.
+			g.options.Pages = g.installedPages()
+			return g, nil //nolint:nilerr // shown by the window instead
+		}
+		g.scope = g.old.receipt.Scope
+		g.previous, g.deferred = engine.Previous(m, g.old.receipt, e.Getenv)
+		if !needsElevation(g.scope) {
+			g.deferred = nil
+		}
+		pages = append(pages, &replacePage{g: g})
+	} else {
+		pages = append(pages, wizard.Welcome("Welcome", g.welcome()))
+	}
 	if m.Licence != "" {
 		pages = append(pages, wizard.Licence(m.Licence))
 	}
@@ -100,10 +119,13 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 		}
 		pages = append(pages, page)
 	}
-	if len(m.Scopes) > 1 {
+	if len(m.Scopes) > 1 && g.old == nil {
 		pages = append(pages, &scopePage{g: g})
 	}
 	for _, scope := range m.Scopes {
+		if g.old != nil {
+			break // a new version goes where the old one is
+		}
 		root := f.dir
 		if root == "" || scope != f.scope {
 			if root, err = engine.DefaultRoot(m, scope, e.Getenv); err != nil {
@@ -120,7 +142,7 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 		pages = append(pages, d)
 	}
 	pages = append(pages, &summaryPage{g: g})
-	pages = append(pages, wizard.Progress("Installing", engine.ManifestSteps(m), m.App.Name+" is installed.", g.job).WithBar())
+	pages = append(pages, wizard.Progress("Installing", engine.ManifestSteps(m, g.existing != nil), m.App.Name+" is installed.", g.job).WithBar())
 	var checks []*widget.Check
 	if m.Launch != "" {
 		g.launch = widget.NewCheck(LaunchNow, nil)
@@ -171,11 +193,17 @@ func (g *installWizard) parametersPage() (wizard.Page, error) {
 			v, ok = side[p.Name]
 		}
 		if !ok {
+			v, ok = g.previous[p.Name]
+		}
+		if !ok {
 			v = p.Default
 		}
 		initial[p.Name] = v
 		if p.Secret {
 			entry := widget.NewPasswordEntry()
+			if slices.Contains(g.deferred, p.Name) {
+				entry.PlaceHolder = "kept from the installed version"
+			}
 			field := forms.Custom(p.Name, label(p), entry, func() string { return entry.Text }, entry.SetText)
 			entry.OnChanged = func(s string) { field.Notify(s) }
 			fields = append(fields, field)
@@ -187,7 +215,7 @@ func (g *installWizard) parametersPage() (wizard.Page, error) {
 	return wizard.Form("Settings", g.form, initial, func() bool {
 		vals := g.form.Values()
 		for _, p := range g.m.Parameters {
-			if p.Required && strings.TrimSpace(vals[p.Name]) == "" {
+			if p.Required && strings.TrimSpace(vals[p.Name]) == "" && !slices.Contains(g.deferred, p.Name) {
 				return false
 			}
 		}
@@ -231,9 +259,13 @@ func (s *summaryPage) Build(*wizard.Wizard) fyne.CanvasObject {
 
 func (s *summaryPage) Enter(w *wizard.Wizard) {
 	g := s.g
-	g.plan, g.planErr = engine.NewPlan(g.m, engine.Options{
-		Scope: g.scope, Root: g.dirs[g.scope].Value(), Env: g.e.Getenv, Uninstaller: g.p.Uninstaller, Params: g.params(),
-	})
+	o := engine.Options{Scope: g.scope, Env: g.e.Getenv, Uninstaller: g.p.Uninstaller, Params: g.params()}
+	if g.old != nil {
+		o.Root, o.Replacing = g.old.ix.Root, g.old.receipt
+	} else {
+		o.Root = g.dirs[g.scope].Value()
+	}
+	g.plan, g.planErr = engine.NewPlan(g.m, o)
 	s.box.Objects = nil
 	if g.planErr != nil {
 		w.SetMessage(g.planErr.Error(), fd.StatusBad)
@@ -251,9 +283,14 @@ func (s *summaryPage) Enter(w *wizard.Wizard) {
 	}
 	rows := []fyne.CanvasObject{
 		widgets.PlainRow("Program", g.m.App.Name+" "+g.m.App.Version),
+	}
+	if g.old != nil {
+		rows = append(rows, widgets.PlainRow("Replaces", replacementText(g.m, g.old.receipt.App.Version)+", through its own uninstaller"))
+	}
+	rows = append(rows,
 		widgets.PlainRow("Location", g.plan.Root),
 		widgets.PlainRow("Files", fmt.Sprintf("%d, %s", len(g.plan.Files), widgets.HumanSize(size))),
-	}
+	)
 	for _, l := range g.plan.Links {
 		rows = append(rows, widgets.PlainRow("Link", l.Dst))
 	}
@@ -277,6 +314,57 @@ func (s *summaryPage) Enter(w *wizard.Wizard) {
 	}
 	s.box.Objects = rows
 	s.box.Refresh()
+}
+
+// Labels of the replace page.
+const (
+	ConfirmDowngrade = "Replace it with this older version"
+	UninstallInstead = "Uninstall it instead"
+)
+
+// replacePage is the first page when the app is installed already (R17):
+// what this installer will do to it. A downgrade waits for a check. The
+// button hands over to the installed uninstaller.
+type replacePage struct {
+	g     *installWizard
+	check *widget.Check
+}
+
+func (r *replacePage) Title() string {
+	switch replacement(r.g.old.receipt.App.Version, r.g.m.App.Version) {
+	case "upgrade":
+		return "Upgrade"
+	case "downgrade":
+		return "Downgrade"
+	}
+	return "Repair"
+}
+
+func (r *replacePage) Valid() bool {
+	return replacement(r.g.old.receipt.App.Version, r.g.m.App.Version) != "downgrade" || (r.check != nil && r.check.Checked)
+}
+
+func (r *replacePage) Build(w *wizard.Wizard) fyne.CanvasObject {
+	g, old := r.g, r.g.old.receipt
+	box := container.NewVBox(
+		widgets.Wrapped(fmt.Sprintf("%s %s is installed in %s.", old.App.Name, old.App.Version, old.Root)),
+		widgets.Wrapped(fmt.Sprintf("%s. The uninstaller that came with %s removes it first, and puts back anything it replaced; "+
+			"then this version installs in the same place.", replacementText(g.m, old.App.Version), old.App.Version)),
+	)
+	for _, k := range old.Keep {
+		box.Add(widgets.Wrapped(fmt.Sprintf("Your data in %s stays.", k)))
+	}
+	if replacement(old.App.Version, g.m.App.Version) == "downgrade" {
+		r.check = widget.NewCheck(ConfirmDowngrade, func(bool) { w.Revalidate() })
+		box.Add(r.check)
+	}
+	box.Add(widget.NewSeparator())
+	box.Add(container.NewHBox(widget.NewButton(UninstallInstead, func() {
+		g.uninstalling = true
+		start(g.existing.Uninstaller, "--gui")
+		w.Cancel()
+	})))
+	return box
 }
 
 // Labels of the scope choice.
@@ -325,12 +413,13 @@ func (d *scopedDir) Skip() bool { return d.g.scope != d.scope }
 // steps and files to the progress page.
 func (g *installWizard) job(ctx context.Context, r *wizard.Reporter) error {
 	elevate := needsElevation(g.plan.Scope)
+	var l *lock
 	if !elevate {
-		unlock, err := engine.Lock(g.m.App.ID, g.plan.Scope, g.e.Getenv)
-		if err != nil {
+		var err error
+		if l, err = takeLock(g.m.App.ID, g.plan.Scope, g.e.Getenv); err != nil {
 			return err
 		}
-		defer unlock()
+		defer l.Release()
 	}
 	last := -1
 	report := func(ev engine.Event) {
@@ -357,12 +446,19 @@ func (g *installWizard) job(ctx context.Context, r *wizard.Reporter) error {
 			r.Progress(fraction, countsText(ev.Counts), g.short(ev.Text))
 		}
 	}
-	if elevate {
+	switch {
+	case elevate:
 		if err := applyRequest(ctx, g.plan, true, g.e, report); err != nil {
 			return err
 		}
-	} else if _, err := engine.Apply(ctx, g.plan, g.p.Files, g.p.Uninstaller, report); err != nil {
-		return err
+	case g.old != nil:
+		if err := replace(ctx, g.plan, g.old, g.p, g.e.Getenv, l, report); err != nil {
+			return err
+		}
+	default:
+		if _, err := engine.Apply(ctx, g.plan, g.p.Files, g.p.Uninstaller, report); err != nil {
+			return err
+		}
 	}
 	if last >= 0 {
 		r.Finish(last, "")
@@ -397,6 +493,9 @@ func (g *installWizard) installedPages() []wizard.Page {
 // after acts on the wizard's result: launch the program, or run an
 // existing install's uninstaller. It returns the exit code.
 func (g *installWizard) after(r wizard.Result) int {
+	if g.uninstalling {
+		return exitOK
+	}
 	switch r.Outcome {
 	case wizard.Failed:
 		return exitFail
@@ -503,7 +602,7 @@ func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) (wi
 			return err
 		}
 		defer unlock()
-		left, err = engine.Uninstall(r, report)
+		left, err = engine.Uninstall(r, engine.ReasonUninstall, report)
 		return err
 	}
 	return wizard.ConfirmOptions{
