@@ -230,6 +230,11 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 	if err := j.write(p.Index, bytes.NewReader(ix), "", 0o644, false); err != nil {
 		return nil, err
 	}
+	// A later installer believes this record only when an administrator
+	// wrote it (see platform.IndexTrusted).
+	if err := platform.ProtectIndex(p.vars, p.Index); err != nil {
+		return nil, err //nolint:wrapcheck // the message is the platform's
+	}
 	rcpt.Journal = j.entries
 	b, err := marshal(rcpt)
 	if err != nil {

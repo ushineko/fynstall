@@ -130,7 +130,7 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 	if !f.yes && !f.dryRun {
 		prompt = ask.parameter
 	}
-	elevate := needsElevation(f.scope)
+	elevate := needsElevation(f.scope, e.Getenv)
 	var previous map[string]string
 	var deferred []string
 	if old != nil {
@@ -229,7 +229,7 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 	_, _ = fmt.Fprintf(e.Out, "Copied %s files (%s).\n", thousands(len(plan.Files)), humanSize(size))
 	_, _ = fmt.Fprintf(e.Out, "Installed %s %s in %s.\nTo remove it, run %s.\n", m.App.Name, m.App.Version, plan.Root, filepath.Join(plan.Root, engine.UninstallName))
 	for _, d := range plan.PathDirs {
-		_, _ = fmt.Fprintf(e.Out, "%s is on your PATH. A console that you open from now on finds the programs in it.\n", d)
+		_, _ = fmt.Fprintf(e.Out, "%s is on %s. A console that you open from now on finds the programs in it.\n", d, whosePath(plan.Scope, "your PATH"))
 	}
 	if len(plan.Links) > 0 {
 		if bin := filepath.Dir(plan.Links[0].Dst); !onPath(bin, e.Getenv("PATH")) {
@@ -332,7 +332,7 @@ func shellLines(p *engine.Plan) []string {
 		out = append(out, fmt.Sprintf("registry %s (%d values)", k.Key, len(k.Values)))
 	}
 	for _, d := range p.PathDirs {
-		out = append(out, fmt.Sprintf("PATH     %s is added to yours, unless it is there already", d))
+		out = append(out, fmt.Sprintf("PATH     %s is added to %s, unless it is there already", d, whosePath(p.Scope, "yours")))
 	}
 	return out
 }
@@ -432,4 +432,13 @@ func forceUninstall(ix *engine.Index, e Env, verbose bool) int {
 	}
 	printLeftovers(e, left, verbose)
 	return exitOK
+}
+
+// whosePath names the PATH a directory goes on: the person's own, as mine
+// says it, or the computer's for an install for everyone.
+func whosePath(scope, mine string) string {
+	if scope == "system" {
+		return "the PATH of this computer"
+	}
+	return mine
 }

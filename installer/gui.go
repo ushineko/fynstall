@@ -105,7 +105,7 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 		}
 		g.scope = g.old.receipt.Scope
 		g.previous, g.deferred = engine.Previous(m, g.old.receipt, e.Getenv)
-		if !needsElevation(g.scope) {
+		if !needsElevation(g.scope, g.e.Getenv) {
 			g.deferred = nil
 		}
 		pages = append(pages, &replacePage{g: g})
@@ -443,7 +443,7 @@ func (d *scopedDir) Skip() bool { return d.g.scope != d.scope }
 // job installs the plan the summary page made, reporting the engine's
 // steps and files to the progress page.
 func (g *installWizard) job(ctx context.Context, r *wizard.Reporter) error {
-	elevate := needsElevation(g.plan.Scope)
+	elevate := needsElevation(g.plan.Scope, g.e.Getenv)
 	var l *lock
 	if !elevate {
 		var err error
@@ -550,7 +550,7 @@ func (g *installWizard) after(r wizard.Result) int {
 // shows a window and needs no console; the app's own program gets what
 // Windows gives it.
 func start(path string, ours bool, args ...string) {
-	cmd := exec.CommandContext(context.Background(), path, args...) // #nosec G204 -- a path this install wrote, or its index recorded
+	cmd := exec.CommandContext(context.Background(), path, args...) // #nosec G204 G702 -- a path this install wrote, or its index recorded
 	if ours {
 		platform.Background(cmd)
 	}
@@ -608,7 +608,7 @@ func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) (wi
 		}
 	}
 	detail := fmt.Sprintf("It removes `%s`, and puts back anything its install replaced.", r.Root)
-	if needsElevation(r.Scope) {
+	if needsElevation(r.Scope, env) {
 		detail += "\n\nIt is installed for everyone on this computer, so it asks for an administrator."
 	}
 	for _, hk := range r.Hooks {
@@ -619,7 +619,7 @@ func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) (wi
 	}
 	report := func(engine.Event) {}
 	uninstall := func(ctx context.Context) error {
-		if needsElevation(r.Scope) {
+		if needsElevation(r.Scope, env) {
 			// Not the job's context: the window cancels that when the job
 			// returns, and the helper must outlive it to hear the answer
 			// about the leftovers. An uninstall is not cancelled part-way.

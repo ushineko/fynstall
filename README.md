@@ -14,9 +14,9 @@ delivered in phases; this README changes as each phase lands.
 
 Linux installers, per-user, with a wizard and a command line, launcher
 entries, icons, links on `PATH`, parameters and configuration files, and
-system-wide installs and upgrades. On Windows: per-user installs from the
-wizard and the command line, with a Start Menu shortcut, an entry in
-Settings > Apps and an entry on `PATH`. System-wide installs on Windows
+system-wide installs and upgrades. On Windows: per-user and system-wide
+installs from the wizard and the command line, with a Start Menu shortcut,
+an entry in Settings > Apps and an entry on `PATH`. Services on Windows
 follow.
 
 ## Using it
@@ -109,6 +109,16 @@ MIT. See [LICENSE](LICENSE).
 ## Changelog
 
 ### Unreleased
+
+- System scope on Windows (spec 001 phase 7c): an install for everyone on
+  the computer goes in `%ProgramFiles%\<id>`, with its record in
+  `%ProgramData%`, its Settings > Apps entry under `HKLM`, its shortcut in
+  the Start Menu of all users and its directory on the computer's `PATH`.
+  Only the changes run as an administrator, in a helper started through one
+  UAC prompt, which reports over named pipes; the uninstaller elevates the
+  same way. The wizard asks who the install is for. The record of a system
+  install is taken only when an administrator wrote it
+  ([#1](https://github.com/ushineko/fynstall/issues/1)).
 
 - The wizard on Windows (spec 001 phase 7c): `fynstall build` on Windows
   makes the full installer and uninstaller. Started from Explorer, the

@@ -840,6 +840,73 @@ Phase 7c, first part:
       questions; an elevated console gets the command line and a refusal of
       `--gui`.
 
+Chosen for the second part of 7c (2026-10-10). The maintainer agreed the
+first three before the work started; the rest are for the PR. Neither the
+config format nor the receipt changes.
+
+- The helper reports over named pipes that the person's process makes
+  before it starts the helper through `ShellExecuteEx` with `runas`. There
+  are two, one for each direction, because the parent stops the helper by
+  closing its input and goes on reading its events; one pipe cannot be half
+  closed. Not chosen: a file that the helper appends to, which has no way
+  to cancel and none to hold the helper while the window asks about
+  leftovers.
+- The system install index is `%ProgramData%\fynstall\installs`.
+- System paths: `{programs}` is `%ProgramFiles%`, `{data}` and `{config}`
+  are `%ProgramData%`, the registry entries are under `HKLM`, and the
+  directory goes on the machine's `PATH`. The folders are asked of Windows
+  (known folders), not read from the environment.
+- Any user can make files in `%ProgramData%`, and a later installer runs
+  the uninstaller that the index names, as an administrator. So the helper
+  makes the index file the administrators' own with a closed access list,
+  and an installer takes an index file only when the administrators or the
+  system own it. A user cannot give a file away to them.
+- The tests run a system install under `FYNSTALL_TEST_SYSTEM_ROOT`, with
+  the registry under the test's root and the helper started as a plain
+  child (`FYNSTALL_ELEVATE=direct`). Both roots are honoured in an elevated
+  process, because the tests run in elevated consoles. The caution written
+  for 7b, that a real helper must not take these variables from the process
+  that starts it, is met this way: a helper that is elevated when the
+  process on the other end of its pipes is not drops all three. A system
+  root without a registry root is refused, so no test can write `HKLM`.
+- A process that is already elevated makes the changes itself. With
+  `FYNSTALL_ELEVATE` set, it uses a helper all the same, so the tests cover
+  the helper wherever they run.
+- R9f for system scope is the per-user way: the running uninstaller moves
+  itself to `%TEMP%`. The helper is an administrator, so the delete at the
+  next start is accepted.
+- Open, for the maintainer: a system install in a directory that users can
+  write (`--dir` outside `%ProgramFiles%`) leaves `uninstall.exe` where a
+  user can replace it, and an administrator later runs it. The docs say to
+  keep system installs under `%ProgramFiles%`; nothing enforces it.
+
+Phase 7c, second part:
+
+- [x] A system install runs through the helper and its pipes: files under
+      the machine's folders, the Uninstall entry and `PATH` under `HKLM`,
+      the shortcut in the Start Menu of all users; a later installer finds
+      it without `--scope` and repairs it; the installed uninstaller
+      removes it through a helper of its own, and files and registry match
+      their state before
+      (`TestASystemInstallGoesThroughTheHelperAndComesOutAgain`).
+- [x] System paths come from Windows, and the test root moves all of them
+      and needs a registry root (`TestSystemVarsAreTheMachinesFolders`,
+      `TestTheTestSystemRootNeedsARegistryRootAndMovesEverything`).
+- [x] The index of a system install is trusted only from an administrator
+      (`TestTheRecordOfASystemInstallIsTrustedOnlyFromAnAdministrator`).
+- [x] The wizard asks who the install is for, with a location page for
+      each scope (`TestTheWizardAsksWhoTheInstallIsFor`, now on Windows).
+- [ ] Desk check on Windows 11, from a console that is not elevated:
+      `--scope system` shows one UAC prompt, installs into
+      `%ProgramFiles%`, and the program is in Start for another user and in
+      Settings > Apps; closing the prompt changes nothing and says so; the
+      uninstaller shows one prompt and leaves `HKLM` and the folders as
+      they were (`reg export` and `fc`); the wizard does the same with
+      "Everyone on this computer".
+- [ ] A helper started through a real prompt ignores the test variables.
+      Nothing here could make that case: it needs a process that is not
+      elevated to start one that is.
+
 The whole of phase 7:
 
 A
@@ -1056,6 +1123,35 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 7c, second part (2026-10-10)
+
+Same machine. `go test -race ./...` passes, and golangci-lint v2.12.2
+reports 0 issues. The CLI-only code and tests compile for Linux. The Linux
+helper moved to a file of its own with its behaviour unchanged, and the
+shared code now goes through `launchHelper`; nothing ran on Linux, so
+`make test` there is the check that the move changed nothing.
+
+By hand, with the CLI installer of `examples/hello`, a system root and a
+registry root of the check's own, from an elevated console:
+
+- With the helper started as a plain child: `--scope system --yes` exited
+  0 and wrote the install under `<root>\Program Files`, the index and the
+  shortcut under `<root>\ProgramData`, and the Uninstall key and `PATH`
+  under the registry root's `HKLM`. The installed uninstaller exited 0 and
+  left no file under the root and no key.
+- The same through `ShellExecuteEx` with `runas`
+  (`FYNSTALL_ELEVATE=prompt`): the same result. Windows shows no prompt to
+  a process that is already elevated, so this ran the code that starts the
+  helper and connects the pipes, not the prompt.
+- After both, and after the test runs: no `HKLM` Uninstall key, no
+  `%ProgramFiles%\io.ushineko.hello`, no `%ProgramData%\fynstall`, and the
+  machine's and the user's `PATH` unchanged.
+
+Not done, and not possible from an elevated console: a real UAC prompt,
+its refusal, a helper running as a different administrator, and the rule
+that such a helper drops the test variables. Nothing has been installed
+into the real `%ProgramFiles%` or `HKLM`. No mutation checks were run.
 
 ### Phase 7c, first part (2026-10-10)
 

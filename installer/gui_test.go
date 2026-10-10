@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,7 +58,8 @@ func guiFixture(t *testing.T) (*manifest.Manifest, Payload, Env, string) {
 	}
 	p := Payload{Files: fstest.MapFS{"bin/hello": {Data: []byte(content)}}, Uninstaller: []byte("uninstaller")}
 	run := t.TempDir()
-	vars := map[string]string{"HOME": home, "USERPROFILE": home, "XDG_RUNTIME_DIR": run, regtest.Env: regtest.Root(t)}
+	vars := map[string]string{"HOME": home, "USERPROFILE": home, "XDG_RUNTIME_DIR": run, regtest.Env: regtest.Root(t),
+		"FYNSTALL_TEST_SYSTEM_ROOT": t.TempDir()}
 	e := Env{Getenv: func(k string) string { return vars[k] }, ExeDir: t.TempDir()}
 	if runtime.GOOS == "windows" {
 		// Before any install: a fixture whose registry writes would reach
@@ -280,19 +280,9 @@ func TestTheWizardAsksWhoTheInstallIsFor(t *testing.T) {
 	m, p, e, _ := guiFixture(t)
 	m.Parameters, m.ConfigFiles, m.Licence = nil, nil, ""
 	m.Scopes = []string{"user", "system"}
-	m.Dirs["system"] = "/opt/{id}"
+	m.Dirs["system"] = "{programs}/{id}"
 	g, err := newInstallWizard(m, p, installFlags{scope: "user"}, e)
 	require.NoError(t, err)
-	if _, err := platform.Vars("system", e.Getenv); errors.Is(err, platform.ErrScopeUnavailable) {
-		// Until this platform has system scope, the wizard offers the one
-		// it has and does not ask.
-		for _, pg := range g.options.Pages {
-			require.NotEqual(t, "Install for", pg.Title())
-		}
-		require.Contains(t, g.dirs, "user")
-		require.NotContains(t, g.dirs, "system")
-		return
-	}
 	w := wizard.Headless(fynetest.App(t), g.options)
 	w.Next() // Welcome
 	require.Equal(t, "Install for", w.Current().Title())
@@ -303,11 +293,14 @@ func TestTheWizardAsksWhoTheInstallIsFor(t *testing.T) {
 	w.Next()
 	require.Equal(t, "Location", w.Current().Title())
 	require.Equal(t, g.dirs["user"].DirectoryPage, w.Current().(*scopedDir).DirectoryPage)
-	require.Contains(t, g.dirs["user"].Value(), ".local/share/io.example.hello")
+	require.Equal(t, at(t, e, "programs", "io.example.hello"), g.dirs["user"].Value())
 	w.Back()
 	radio[0].SetSelected(ForEveryone)
 	w.Next()
-	require.Equal(t, "/opt/io.example.hello", w.Current().(*scopedDir).Value(), "the system page, with its own default")
+	machine, err := engine.DefaultRoot(m, "system", e.Getenv)
+	require.NoError(t, err)
+	require.NotEqual(t, g.dirs["user"].Value(), machine)
+	require.Equal(t, machine, w.Current().(*scopedDir).Value(), "the system page, with its own default")
 	w.Next()
 	require.Equal(t, "Ready", w.Current().Title())
 	require.Equal(t, "system", g.plan.Scope)

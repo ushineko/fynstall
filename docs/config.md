@@ -388,19 +388,18 @@ target, and records the target in the installer's manifest.
 Path templates in `install.dir` and `keep_on_uninstall` can use these
 names. Each one is resolved on the machine that runs the installer.
 
-| Placeholder | Linux, per-user | Linux, system | Windows, per-user |
-|---|---|---|---|
-| `{id}`, `{name}`, `{version}` | From `app`. | From `app`. | From `app`. |
-| `{home}` | `$HOME` | none: a validation error | `%USERPROFILE%` |
-| `{data}` | `$XDG_DATA_HOME`, else `~/.local/share` | `/usr/local/share` | `%LOCALAPPDATA%`, else `%USERPROFILE%\AppData\Local` |
-| `{config}` | `$XDG_CONFIG_HOME`, else `~/.config` | `/etc` | `%APPDATA%`, else `%USERPROFILE%\AppData\Roaming` |
-| `{bin}` | `~/.local/bin` | `/usr/local/bin` | none: the install stops |
-| `{programs}` | the same as `{data}` | `/opt` | `%LOCALAPPDATA%\Programs` |
+| Placeholder | Linux, per-user | Linux, system | Windows, per-user | Windows, system |
+|---|---|---|---|---|
+| `{id}`, `{name}`, `{version}` | From `app`. | From `app`. | From `app`. | From `app`. |
+| `{home}` | `$HOME` | none: a validation error | `%USERPROFILE%` | none: a validation error |
+| `{data}` | `$XDG_DATA_HOME`, else `~/.local/share` | `/usr/local/share` | `%LOCALAPPDATA%`, else `%USERPROFILE%\AppData\Local` | `%ProgramData%` |
+| `{config}` | `$XDG_CONFIG_HOME`, else `~/.config` | `/etc` | `%APPDATA%`, else `%USERPROFILE%\AppData\Roaming` | `%ProgramData%` |
+| `{bin}` | `~/.local/bin` | `/usr/local/bin` | none: the install stops | none: the install stops |
+| `{programs}` | the same as `{data}` | `/opt` | `%LOCALAPPDATA%\Programs` | `%ProgramFiles%` |
 
 An unknown placeholder is a validation error. A relative `XDG_*` value is
 ignored, as the XDG base directory specification requires; so is a relative
-`LOCALAPPDATA` or `APPDATA`. Windows has no system scope yet. See
-[platforms.md](platforms.md).
+`LOCALAPPDATA` or `APPDATA`. See [platforms.md](platforms.md).
 
 ## What an install writes
 
