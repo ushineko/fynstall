@@ -8,10 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 // Vars returns a value for every location placeholder (home, data, config,
-// bin) for scope; system scope has no home. It also holds the scope, the
+// bin, programs) for scope; system scope has no home. It also holds the scope, the
 // index directory and the system root under keys no template can name.
 // env reads an environment variable; tests pass their own.
 func Vars(scope string, env func(string) string) (map[string]string, error) {
@@ -27,12 +28,14 @@ func IndexDir(v map[string]string) string { return v[keyIndex] }
 func System(v map[string]string) bool { return v[keyScope] == "system" }
 
 // Rooted puts an absolute install directory under v's system root, which is
-// "" except in the tests (see SystemRoot).
+// "" except in the tests (see SystemRoot). A directory made from a
+// placeholder is under the root already and stays where it is.
 func Rooted(v map[string]string, dir string) string {
-	if v[keyRoot] == "" || !filepath.IsAbs(dir) {
+	root := v[keyRoot]
+	if root == "" || !filepath.IsAbs(dir) || dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
 		return dir
 	}
-	return filepath.Join(v[keyRoot], dir)
+	return filepath.Join(root, dir)
 }
 
 // Keys of Vars that are not placeholders: a template cannot name them,

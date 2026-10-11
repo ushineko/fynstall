@@ -159,7 +159,8 @@ app:
 install:
   scopes: [user]              # user installs need no elevation
   dir:
-    user: "{data}/{id}"       # ~/.local/share/io.example.myapp on Linux
+    user: "{programs}/{id}"   # ~/.local/share/io.example.myapp on Linux,
+                              # %LOCALAPPDATA%\Programs\io.example.myapp on Windows
 
 # Every file the installer writes, relative to the install directory.
 # A directory src is copied recursively; mode is detected unless given.
@@ -176,6 +177,6 @@ integration:
   keep_on_uninstall:
     - "{config}/myapp"
 
-# Placeholders: {id} {name} {version} {home} {data} {config} {bin}
+# Placeholders: {id} {name} {version} {home} {data} {config} {bin} {programs}
 # targets: [linux/amd64]      # default: the machine that builds
 `

@@ -28,7 +28,9 @@ func vars(scope string, env func(string) string) (map[string]string, error) {
 			"home":   home,
 			"data":   data,
 			"config": roaming,
-			keyScope: scope, keyIndex: filepath.Join(data, "fynstall", "installs"),
+			// Where Windows puts a program installed for one user (R18).
+			"programs": filepath.Join(data, "Programs"),
+			keyScope:   scope, keyIndex: filepath.Join(data, "fynstall", "installs"),
 			keyStartMenu: filepath.Join(roaming, "Microsoft", "Windows", "Start Menu", "Programs"),
 			keyRegRoot:   RegistryRoot(env),
 		}, nil

@@ -581,10 +581,11 @@ decision.
 Several PRs, as phases 4 and 6 were. 7a is a per-user install and uninstall
 from the command line, and the tests running on Windows. 7b is the registry
 journal (the Uninstall entry, `PATH`), the Start Menu shortcut and the
-`.ico`. Proposed for the rest: 7c the wizard, mode selection (R19) and the
-helper under UAC with system scope; 7d services, permissions, the leaf
-requirements, and the icon and version resources of the installer's own
-`.exe` (L7), which need one writer of Windows resource objects between them.
+`.ico`, with the icon as a resource of the installer's own `.exe`. Proposed
+for the rest: 7c the wizard, mode selection (R19) and the helper under UAC
+with system scope; 7d services, permissions, the leaf requirements, and the
+version resource and manifest of the `.exe` (L7), which go through the
+writer of resource objects that the icon uses.
 
 Chosen for 7a (2026-10-10). Each is for the maintainer to confirm in the
 PR; none changes the config format or the receipt.
@@ -615,7 +616,8 @@ PR; none changes the config format or the receipt.
   message, and an installer whose config has launcher entries, icons or
   links says they are not applied on this platform yet (spec 002).
 
-Open after 7a, to decide before 7b:
+Open after 7a, and decided by the maintainer on 2026-10-10 (see "Decided
+after 7b" below):
 
 - The default install directory. `{data}/{id}` gives
   `%LOCALAPPDATA%\io.ushineko.hello`, and R18 says
@@ -704,6 +706,33 @@ receipt written on Linux is unchanged.
   honoured in an elevated process: see Verification for why. The helper of
   a system install must not take it from the process that starts it (7c).
 
+Decided after 7b (2026-10-10). The maintainer answered the open points:
+`PATH` is edited, as chosen above; the installer's `.exe` needs the icon
+now, not in 7d; `{programs}` and `{exe}` in `examples/hello` go ahead.
+
+- `{programs}` is a new placeholder: where the platform keeps installed
+  programs. It is `{data}` for a per-user install on Linux and `/opt` for a
+  system install, and `%LOCALAPPDATA%\Programs` for a per-user install on
+  Windows (`%ProgramFiles%` comes with system scope in 7c). The default of
+  `install.dir` is `{programs}/{id}` for both scopes. On Linux that is the
+  directory the old defaults gave, and a config that names `{data}/{id}` or
+  `/opt/{id}` means what it did. The change to the config format is
+  additive.
+- The directory is named for the ID, not for the name as R18 says: the
+  default is one template for every platform, and the ID is what names the
+  directory on Linux. A config that wants `Programs\Hello` says
+  `{programs}/{name}`. For the maintainer to confirm.
+- `examples/hello` names `bin/hello{exe}` and `{programs}/{id}`, and
+  `make hello` writes `hello.exe` on Windows. The one config builds the
+  Linux installer and the Windows one.
+- The icon of the `.exe`: the builder writes a COFF object with a `.rsrc`
+  section (each image of the `.ico`, and the group that lists them) into
+  the directory of each generated program, and the Go linker puts it in the
+  `.exe`. The builder writes the object itself, so a build from Linux needs
+  no resource compiler and the CLI-only build still needs no C compiler.
+  Both the installer and the uninstaller carry it. The version resource and
+  the manifest (L7) are more entries for the same writer, in 7d.
+
 Phase 7b:
 
 - [x] Every install has an Uninstall registry entry with the L8 fields,
@@ -730,6 +759,20 @@ Phase 7b:
       (`TestARepairLeavesOneSetOfRegistryEntries`).
 - [x] `app.icon` becomes an `.ico` with five sizes, the same bytes for the
       same source (`TestAWindowsTargetGetsTheIconAsAnIcoFile`).
+- [x] The installer and the uninstaller for a Windows target carry the
+      icon as a resource: the images of the `.ico` and one group, read back
+      from the built `.exe` files and from the installed `uninstall.exe`
+      (`TestTheIconResourcesAreOneSectionTheLinkerCanPlace`,
+      `TestAnInstallIsInTheStartMenuInSettingsAndOnPath`). Built on Windows;
+      the build from Linux uses the same code and has not run.
+- [x] `{programs}` resolves per platform and scope, and is the default
+      install directory (`TestUserVarsComeFromTheProfile`, and on Linux
+      `TestUserScopeFollowsXDGAndIgnoresRelativeValues`,
+      `TestSystemScopeIsUnderUsrLocalAndHasNoHome` and
+      `TestTheTestSystemRootMovesEverySystemPathButNeverForRoot`, which
+      compile and have not run).
+- [x] `examples/hello`, unchanged, builds a CLI-only Windows installer on
+      Windows. The full installer waits for the wizard (7c).
 - [ ] Desk check on Windows 11, in the real profile: the program is in
       Start with its icon and starts from there; it is in Settings > Apps
       with its name, version, publisher, size and icon, and Uninstall there
@@ -985,6 +1028,41 @@ only by the builder test, which decodes it.
 
 The desk check in the real profile, in the phase 7b list, is still to do:
 it is the first run that writes the real Start Menu, Settings and `PATH`.
+
+`{programs}`, `{exe}` in `examples/hello`, and the icon resource
+(2026-10-10, same machine). `go test -race ./...` passes and the linter
+reports 0 issues. The code and the tests compile for Linux; nothing ran on
+Linux, and this change touches Linux behaviour in two places that only a
+Linux run checks: the default install directory is now made from
+`{programs}`, and `platform.Rooted` leaves a path that is already under the
+test system root where it is. `make test` on Linux must pass before this
+merges.
+
+By hand: `fynstall build --cli-only` on `examples/hello`, unchanged, made
+`hello-0.1.0-windows-amd64-cli-installer.exe` and its uninstaller. Windows
+(`System.Drawing.Icon.ExtractAssociatedIcon`) returned the Hello icon for
+both files. `--dry-run` listed the install under
+`%LOCALAPPDATA%\Programs\io.ushineko.hello` with the shortcut, the registry
+key and the `PATH` entry, and changed nothing.
+
+The desk check in the real profile (2026-10-10, Windows 11 Pro, that
+installer). The install exited 0 and wrote the install directory, the
+shortcut `Hello.lnk`, the Uninstall key with its 10 values and one entry at
+the end of the user `PATH` (14 entries became 15, the kind of the value
+unchanged). The maintainer looked at the Start Menu entry and its icon,
+the entry in Settings > Apps, the program by name in a new console and the
+icon of the `.exe` files in Explorer, and reported all of them good.
+
+The installed `uninstall.exe`, run from another directory, exited 0. After
+it: `fc` of the `reg export` of `HKCU\Environment` taken before the install
+and after the uninstall found no differences; the Uninstall key, the
+install directory, the shortcut and `%LOCALAPPDATA%\fynstall` were gone;
+the moved uninstaller was in `%TEMP%` as `fynstall-removed-<number>.exe`,
+as R9f for per-user scope says.
+
+Not exercised: Uninstall from Settings > Apps (the uninstall was run from a
+console, so the criterion stays open), and the questions and the hidden
+secret of the phase 7a console check.
 
 ### Phase 7a (2026-10-10)
 

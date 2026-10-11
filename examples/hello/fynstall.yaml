@@ -10,27 +10,30 @@ app:
 
 install:
   # The first is the default. System scope installs for everyone on the
-  # computer, under /opt, and asks for an administrator once.
+  # computer and asks for an administrator once. {programs} is where the
+  # platform keeps programs: ~/.local/share or /opt on Linux,
+  # %LOCALAPPDATA%\Programs on Windows.
   scopes: [user, system]
   dir:
-    user: "{data}/{id}"
-    system: "/opt/{id}"
+    user: "{programs}/{id}"
+    system: "{programs}/{id}"
 
 payload:
-  - src: bin/hello
-    dst: bin/hello
+  # {exe} is ".exe" for a Windows target and nothing elsewhere.
+  - src: bin/hello{exe}
+    dst: bin/hello{exe}
   - src: README.md
     dst: share/doc/README.md
 
 ui:
-  launch: bin/hello      # the finish page offers to start it
+  launch: bin/hello{exe}      # the finish page offers to start it
 
 integration:
-  path_links: [bin/hello]
+  path_links: ["bin/hello{exe}"]
   desktop:
     - name: Hello
       comment: The example program fynstall installs
-      exec: bin/hello
+      exec: bin/hello{exe}
       categories: [Utility]
   keep_on_uninstall:
     - "{config}/io.ushineko.hello"

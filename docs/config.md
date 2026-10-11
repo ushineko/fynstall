@@ -47,6 +47,10 @@ size is installed into the hicolor icon theme under the app ID. KDE uses
 the size that matches the size it asks for, and it only scales between the
 sizes the theme declares, so one large icon is not enough.
 
+For a Windows target the build makes one `.ico` file instead, with the sizes
+16, 32, 48, 64 and 256. The installer and the uninstaller carry the same
+images as a resource, so Explorer shows the icon for the `.exe` files.
+
 The output files take their name from the last segment of the ID:
 `io.example.hello` version 0.1.0 gives `hello-0.1.0-linux-amd64-installer`.
 
@@ -55,8 +59,13 @@ The output files take their name from the last segment of the ID:
 | Key | Default | Meaning |
 |---|---|---|
 | `scopes` | `[user]` | The scopes a user may choose. The first one is the default. |
-| `dir.user` | `{data}/{id}` | Where a per-user install goes. |
-| `dir.system` | `/opt/{id}` | Where a system-wide install goes. |
+| `dir.user` | `{programs}/{id}` | Where a per-user install goes. |
+| `dir.system` | `{programs}/{id}` | Where a system-wide install goes. |
+
+`{programs}` is where the platform keeps installed programs, so one
+template serves every platform and both scopes: `~/.local/share` and `/opt`
+on Linux, `%LOCALAPPDATA%\Programs` on Windows. See
+[Placeholders](#placeholders).
 
 A per-user install needs no elevation. A system install is for everyone
 on the computer. The installer and the uninstaller stay the person's own
@@ -385,6 +394,7 @@ names. Each one is resolved on the machine that runs the installer.
 | `{data}` | `$XDG_DATA_HOME`, else `~/.local/share` | `/usr/local/share` | `%LOCALAPPDATA%`, else `%USERPROFILE%\AppData\Local` |
 | `{config}` | `$XDG_CONFIG_HOME`, else `~/.config` | `/etc` | `%APPDATA%`, else `%USERPROFILE%\AppData\Roaming` |
 | `{bin}` | `~/.local/bin` | `/usr/local/bin` | none: the install stops |
+| `{programs}` | the same as `{data}` | `/opt` | `%LOCALAPPDATA%\Programs` |
 
 An unknown placeholder is a validation error. A relative `XDG_*` value is
 ignored, as the XDG base directory specification requires; so is a relative

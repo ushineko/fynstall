@@ -23,7 +23,9 @@ func vars(scope string, env func(string) string) (map[string]string, error) {
 			"data":   data,
 			"config": absOr(env, "XDG_CONFIG_HOME", filepath.Join(home, ".config")),
 			"bin":    filepath.Join(home, ".local", "bin"),
-			keyScope: scope, keyIndex: filepath.Join(data, "fynstall", "installs"),
+			// A per-user program is data of the user's, by the XDG rules.
+			"programs": data,
+			keyScope:   scope, keyIndex: filepath.Join(data, "fynstall", "installs"),
 		}, nil
 	case "system":
 		// /usr/share and /usr/bin belong to the package manager; locally
@@ -35,7 +37,9 @@ func vars(scope string, env func(string) string) (map[string]string, error) {
 			"data":   filepath.Join(root, "/usr/local/share"),
 			"config": filepath.Join(root, "/etc"),
 			"bin":    filepath.Join(root, "/usr/local/bin"),
-			keyScope: scope, keyIndex: filepath.Join(root, "/var/lib/fynstall/installs"), keyRoot: root,
+			// /opt is for software that is not the distribution's.
+			"programs": filepath.Join(root, "/opt"),
+			keyScope:   scope, keyIndex: filepath.Join(root, "/var/lib/fynstall/installs"), keyRoot: root,
 		}, nil
 	}
 	return nil, unsupportedScope(scope)

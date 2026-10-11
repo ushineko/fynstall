@@ -11,7 +11,7 @@ func TestUserScopeFollowsXDGAndIgnoresRelativeValues(t *testing.T) {
 	env := map[string]string{"HOME": "/h", "XDG_DATA_HOME": "/d", "XDG_CONFIG_HOME": "rel"}
 	v, err := Vars("user", func(k string) string { return env[k] })
 	require.NoError(t, err)
-	for k, want := range map[string]string{"home": "/h", "data": "/d", "config": "/h/.config", "bin": "/h/.local/bin"} {
+	for k, want := range map[string]string{"home": "/h", "data": "/d", "config": "/h/.config", "bin": "/h/.local/bin", "programs": "/d"} {
 		require.Equal(t, want, v[k], k)
 	}
 	require.Equal(t, "/d/fynstall/installs", IndexDir(v))
@@ -26,7 +26,7 @@ func TestUserScopeFollowsXDGAndIgnoresRelativeValues(t *testing.T) {
 func TestSystemScopeIsUnderUsrLocalAndHasNoHome(t *testing.T) {
 	v, err := Vars("system", func(string) string { return "" })
 	require.NoError(t, err)
-	for k, want := range map[string]string{"data": "/usr/local/share", "config": "/etc", "bin": "/usr/local/bin"} {
+	for k, want := range map[string]string{"data": "/usr/local/share", "config": "/etc", "bin": "/usr/local/bin", "programs": "/opt"} {
 		require.Equal(t, want, v[k], k)
 	}
 	require.NotContains(t, v, "home")
@@ -47,6 +47,8 @@ func TestTheTestSystemRootMovesEverySystemPathButNeverForRoot(t *testing.T) {
 	require.Equal(t, "/tmp/sys/usr/local/share", v["data"])
 	require.Equal(t, "/tmp/sys/var/lib/fynstall/installs", IndexDir(v))
 	require.Equal(t, "/tmp/sys/opt/io.x.y", Rooted(v, "/opt/io.x.y"))
+	require.Equal(t, "/tmp/sys/opt", v["programs"])
+	require.Equal(t, "/tmp/sys/opt/io.x.y", Rooted(v, v["programs"]+"/io.x.y"), "a path under the root is not moved twice")
 }
 
 func TestOtherScopesAreErrors(t *testing.T) {
