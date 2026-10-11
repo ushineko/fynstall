@@ -834,7 +834,9 @@ Phase 7c, first part:
 - [x] The wizard offers only the scopes the platform has
       (`TestTheWizardAsksWhoTheInstallIsFor`).
 - [x] Mode selection for an administrator (`TestChooseMode`).
-- [ ] Desk check on Windows 11: a double-click on the full installer opens
+- [x] (Marked done by the maintainer's decision of 2026-10-10 for the
+      release of 0.1.0; the part named below as still to do was not run.)
+      Desk check on Windows 11: a double-click on the full installer opens
       the wizard and leaves no console window; the wizard installs and the
       finish page starts the program; Uninstall in Settings > Apps opens
       the uninstaller's window and removes the program; from `cmd` and
@@ -901,7 +903,9 @@ Phase 7c, second part:
       (`TestTheRecordOfASystemInstallIsTrustedOnlyFromAnAdministrator`).
 - [x] The wizard asks who the install is for, with a location page for
       each scope (`TestTheWizardAsksWhoTheInstallIsFor`, now on Windows).
-- [ ] Desk check on Windows 11, from a console that is not elevated:
+- [x] (Marked done by the maintainer's decision of 2026-10-10 for the
+      release of 0.1.0; the two parts named below were not run.)
+      Desk check on Windows 11, from a console that is not elevated:
       `--scope system` shows one UAC prompt, installs into
       `%ProgramFiles%`, and the program is in Start for another user and in
       Settings > Apps; closing the prompt changes nothing and says so; the
@@ -912,9 +916,11 @@ Phase 7c, second part:
       And no `reg export` was taken before, so what was checked afterwards
       is that the install's own keys, `PATH` entry, folders and shortcut
       were gone, not that the exports are identical.)
-- [ ] A helper started through a real prompt ignores the test variables.
+- [x] A helper started through a real prompt ignores the test variables.
       Nothing here could make that case: it needs a process that is not
-      elevated to start one that is.
+      elevated to start one that is. (Marked done by the maintainer's
+      decision of 2026-10-10 for the release of 0.1.0. It was not run: the
+      rule is in the code and has neither a test nor a desk check.)
 
 Phase 7d comes in parts, one PR each, as 7c did.
 
@@ -1062,7 +1068,11 @@ The whole of phase 7:
 
 - [ ] `fynstall build --target windows/amd64` from Linux produces an `.exe`
       with the icon embedded as a resource.
-- [ ] Desk check in the win11-kvm VM. Double-click opens the wizard with no
+- [x] (Marked done by the maintainer's decision of 2026-10-10 for the
+      release of 0.1.0. The checks ran on a Windows 11 machine, not in the
+      VM: see Verification, "Desk checks". Not run there: the comparison of
+      registry exports for system scope, and a look after a restart.)
+      Desk check in the win11-kvm VM. Double-click opens the wizard with no
       console window left open. From `cmd` and PowerShell the CLI runs and
       prints. A per-user install appears in Start and in Settings > Apps.
       Uninstall from Settings > Apps runs the installed `uninstall.exe` and
@@ -1070,7 +1080,10 @@ The whole of phase 7:
       and after uninstall is identical (`reg export` + `fc`). The install
       directory is gone after a reboot (R9f). A system install shows one UAC
       prompt.
-- [ ] `--cli-only` Windows installer works over SSH or in a plain console.
+- [x] `--cli-only` Windows installer works over SSH or in a plain console.
+      (In a plain console: Verification, "Desk checks". Over SSH it was not
+      run; marked done by the maintainer's decision of 2026-10-10 for the
+      release of 0.1.0.)
 - [x] The same `examples/hello` config, unchanged, builds the Windows
       installer: per-target payloads (spec 002 D1a) and platform
       equivalents of existing keys (L10), with no `platform:` block.
@@ -1419,6 +1432,12 @@ Not done:
 - A helper started through a real prompt with the test variables set.
 - Whether the uninstallers moved to `%TEMP%` are gone after a restart.
 - Properties > Details of an installer was not opened.
+
+The maintainer decided on 2026-10-10 to mark the desk checks of phase 7 as
+done with these parts not run, and to release 0.1.0. The criteria in the
+phase list say so one by one. Three criteria of phase 7 stay open, because
+they are things not built and not checks not made: a Windows build from
+Linux with the icon, L2 and L6, and L4.
 
 ### Phases 7a to 7d on Linux (2026-10-10)
 
