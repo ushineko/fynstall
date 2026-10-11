@@ -213,7 +213,7 @@ func TestTheUninstallerAsksOnceThenRemoves(t *testing.T) {
 			r, err := engine.Apply(context.Background(), plan, p.Files, p.Uninstaller, nil)
 			require.NoError(t, err)
 
-			o, done := uninstallConfirm(r, skip, e.Getenv)
+			o, done := uninstallConfirm(r, skip, e.Getenv, nil)
 			defer done()
 			require.Equal(t, "Uninstall Hello 0.1.0?", o.Question)
 			c := wizard.HeadlessConfirm(fynetest.App(t), o)
@@ -243,7 +243,7 @@ func TestTheUninstallWindowOffersToRemoveTheLeftovers(t *testing.T) {
 			made := filepath.Join(r.Root, "state.db")
 			require.NoError(t, os.WriteFile(made, []byte("the program's"), 0o600))
 
-			o, done := uninstallConfirm(r, false, e.Getenv)
+			o, done := uninstallConfirm(r, false, e.Getenv, nil)
 			defer done()
 			c := wizard.HeadlessConfirm(fynetest.App(t), o)
 			c.Act()
@@ -351,7 +351,7 @@ func TestTheUninstallWindowKeepsItsHelperForTheAnswer(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			helper := helperFor(c.confirms)
 			helperProgram = func() (string, error) { return helper, nil }
-			o, done := uninstallConfirm(r, false, env)
+			o, done := uninstallConfirm(r, false, env, nil)
 			w := wizard.HeadlessConfirm(fynetest.App(t), o)
 			w.Act()
 			require.Equal(t, "Hello left 1 file it made.", w.Question())

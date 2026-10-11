@@ -116,6 +116,10 @@ greet: ## Build examples/greet for each target into examples/greet/build/
 beacon: ## Build examples/beacon into examples/beacon/bin/, for the actions example
 	CGO_ENABLED=0 go build $(GOFLAGS) -o examples/beacon/bin/beacon$(shell go env GOEXE) ./examples/beacon
 
+.PHONY: keyed
+keyed: ## Build examples/keyed into examples/keyed/bin/, for the extension example
+	CGO_ENABLED=0 go build $(GOFLAGS) -o examples/keyed/bin/keyed$(shell go env GOEXE) ./examples/keyed
+
 .PHONY: tidy
 tidy: ## go mod tidy
 	go mod tidy

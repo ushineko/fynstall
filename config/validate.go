@@ -132,6 +132,11 @@ func validate(c *Config, root *yaml.Node) Errors {
 	k.noHomeInSystem(c)
 	k.parameters(c)
 	k.actions(c)
+	if _, err := FindExtension(c); err != nil {
+		k.fail(k.line("extension"), "extension", "%s", strings.TrimPrefix(err.Error(), "extension: "))
+	}
+	// A page of the extension sets parameters, and each must be declared:
+	// that is checked when the installer is built, by the installer itself.
 	k.textFile(c, c.App.Licence, "app.licence", "app", "licence")
 	k.textFile(c, c.UI.Welcome, "ui.welcome", "ui", "welcome")
 	if c.UI.Launch != "" && !k.buildTemplate(c.UI.Launch, "ui.launch", "ui", "launch") {
@@ -348,6 +353,9 @@ func (k *checker) desktop(c *Config) {
 			if msg := CheckDst(d.Exec); msg != "" {
 				k.fail(at("exec"), field+".exec", "%s", msg)
 			}
+		}
+		if d.Autostart && d.Terminal {
+			k.fail(at("autostart"), field+".autostart", "an entry that runs in a terminal cannot start at login: there is no terminal then")
 		}
 		for j, kw := range d.Keywords {
 			if strings.TrimSpace(kw) == "" || strings.ContainsAny(kw, ";") || strings.ContainsFunc(kw, unicode.IsControl) {

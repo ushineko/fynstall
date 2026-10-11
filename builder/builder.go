@@ -24,7 +24,7 @@ import (
 )
 
 // RuntimeModule is the module every generated program imports.
-const RuntimeModule = "github.com/ushineko/fynstall"
+const RuntimeModule = config.RuntimeModule
 
 // Options control a build.
 type Options struct {
@@ -109,7 +109,14 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 		}
 	}
 
-	mod, err := moduleFiles(o)
+	ext, err := config.FindExtension(c)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkExtensionModule(ctx, o, ext); err != nil {
+		return nil, err
+	}
+	mod, err := moduleFiles(o, ext)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +151,16 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 				Installer:   filepath.Join(o.OutDir, name+"-installer"+exe),
 				Uninstaller: filepath.Join(o.OutDir, name+"-uninstaller"+exe),
 			}
-			if err := buildTarget(ctx, o, mod, goos, goarch, m.App, manifestJSON, files, generated, a); err != nil {
+			if err := buildTarget(ctx, o, mod, ext, goos, goarch, m.App, manifestJSON, files, generated, a); err != nil {
 				return nil, fmt.Errorf("target %s: %w", t, err)
+			}
+			if ext != nil && t == host {
+				// The installer checks its own extension: the rules of
+				// its pages, and in a full build that each has a window
+				// (spec 003 R4). Only this machine's installer can run.
+				if err := runCheck(ctx, a.Installer); err != nil {
+					return nil, fmt.Errorf("target %s: %w", t, err)
+				}
 			}
 			out = append(out, a)
 		}
@@ -153,7 +168,7 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 	return out, nil
 }
 
-func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, goarch string, app manifest.App, manifestJSON []byte, files []staged, generated map[string][]byte, a Artifact) error {
+func buildTarget(ctx context.Context, o Options, mod map[string][]byte, ext *config.ExtensionPackage, goos, goarch string, app manifest.App, manifestJSON []byte, files []staged, generated map[string][]byte, a Artifact) error {
 	work, err := os.MkdirTemp("", "fynstall-build-*")
 	if err != nil {
 		return fmt.Errorf("create work directory: %w", err)
@@ -173,7 +188,12 @@ func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, go
 	}
 
 	un := filepath.Join(work, "uninstaller")
-	unMain := fmt.Sprintf(uninstallerMain, app.ID, app.Name, app.Version)
+	extImport, extArg, extField := "", "", ""
+	if ext != nil {
+		extImport = fmt.Sprintf("\n\text %q", ext.ImportPath)
+		extArg, extField = ", &ext.Extension", ", Extension: &ext.Extension"
+	}
+	unMain := fmt.Sprintf(uninstallerMain, extImport, app.ID, app.Name, app.Version, extArg)
 	if err := writeTree(un, mod, unRes, map[string][]byte{"main.go": []byte(unMain)}); err != nil {
 		return err
 	}
@@ -187,7 +207,7 @@ func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, go
 
 	in := filepath.Join(work, "installer")
 	gen := map[string][]byte{
-		"main.go":         []byte(installerMain),
+		"main.go":         []byte(fmt.Sprintf(installerMain, extImport, extField)),
 		"manifest.json":   manifestJSON,
 		"uninstaller.bin": unBytes,
 	}
@@ -216,10 +236,26 @@ func buildTarget(ctx context.Context, o Options, mod map[string][]byte, goos, go
 }
 
 // moduleFiles are the go.mod (and go.sum) every generated program gets.
-func moduleFiles(o Options) (map[string][]byte, error) {
+// With an extension, the module it is in is required too, and replaced by
+// its directory, and its go.sum is added to the generated one (spec 003
+// R1).
+func moduleFiles(o Options, ext *config.ExtensionPackage) (map[string][]byte, error) {
 	var gomod bytes.Buffer
 	fmt.Fprintf(&gomod, "module fynstall.local/generated\n\ngo 1.26.0\n\n")
 	files := map[string][]byte{}
+	// An extension inside fynstall's own module, as its examples are,
+	// comes with the runtime: there is one module to require.
+	own := ext != nil && ext.ModulePath == RuntimeModule
+	if own && o.RuntimePath == "" {
+		return nil, fmt.Errorf("extension: %s is inside fynstall's own module, so it builds only with --runtime-path", ext.ImportPath)
+	}
+	if ext != nil && !own {
+		fmt.Fprintf(&gomod, "require %s v0.0.0\n\nreplace %s => %q\n\n", ext.ModulePath, ext.ModulePath, filepath.ToSlash(ext.ModuleDir))
+		// A module with no dependencies has no go.sum.
+		if sum, err := os.ReadFile(filepath.Join(ext.ModuleDir, "go.sum")); err == nil {
+			files["go.sum"] = sum
+		}
+	}
 	if o.RuntimePath != "" {
 		abs, err := filepath.Abs(o.RuntimePath)
 		if err != nil {
@@ -234,6 +270,9 @@ func moduleFiles(o Options) (map[string][]byte, error) {
 		sum, err := os.ReadFile(filepath.Join(abs, "go.sum"))
 		if err != nil {
 			return nil, fmt.Errorf("runtime path: %w", err)
+		}
+		if len(files["go.sum"]) > 0 {
+			sum = append(append(files["go.sum"], '\n'), sum...)
 		}
 		files["go.sum"] = sum
 	} else {
@@ -317,18 +356,20 @@ func copyPayload(src, dst string) error {
 // uninstallerMain is the uninstaller's main package. It carries the app's
 // identity, so a copy that is not inside an install (the one beside the
 // installer in dist/) can find the install and hand over to its own
-// uninstaller. The values are Go-quoted with %q.
+// uninstaller. The values are Go-quoted with %q. The first and the last
+// verb are the import and the argument of the program's own extension,
+// both empty without one (spec 003).
 const uninstallerMain = `// Code generated by fynstall. DO NOT EDIT.
 
 package main
 
 import (
 	"github.com/ushineko/fynstall/installer"
-	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/manifest"%s
 )
 
 func main() {
-	installer.UninstallMain(manifest.App{ID: %q, Name: %q, Version: %q})
+	installer.UninstallMain(manifest.App{ID: %q, Name: %q, Version: %q}%s)
 }
 `
 
@@ -340,7 +381,7 @@ import (
 	"embed"
 	"io/fs"
 
-	"github.com/ushineko/fynstall/installer"
+	"github.com/ushineko/fynstall/installer"%s
 )
 
 //go:embed manifest.json
@@ -357,6 +398,56 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	installer.Main(installer.Payload{Manifest: manifestJSON, Files: files, Uninstaller: uninstaller})
+	installer.Main(installer.Payload{Manifest: manifestJSON, Files: files, Uninstaller: uninstaller%s})
 }
 `
+
+/*
+checkExtensionModule holds the extension's module to the rules the build
+depends on, before anything is generated (spec 003).
+
+Its go.mod must require the fynstall this builder is: the generated program
+is one build, with one fynstall in it, and an extension written against
+another would be compiled against this one without anybody choosing that.
+A module that replaces fynstall with a directory, or a build with
+--runtime-path, is a development setup and is not held to it.
+
+And the package must build without the wizard, under the nogui tag and
+without cgo, because a --cli-only installer links it too. The go command's
+own output names the file that does not.
+*/
+func checkExtensionModule(ctx context.Context, o Options, ext *config.ExtensionPackage) error {
+	if ext == nil {
+		return nil
+	}
+	if o.RuntimePath == "" && !ext.Replaced && ext.ModulePath != RuntimeModule {
+		switch {
+		case ext.Requires == "":
+			return fmt.Errorf("extension: %s does not require %s, which an extension imports (package extension)", filepath.Join(ext.ModuleDir, "go.mod"), RuntimeModule)
+		case ext.Requires != o.RuntimeVersion:
+			return fmt.Errorf("extension: %s requires fynstall %s, and this builder is fynstall %s; an installer has one fynstall in it, so make them the same",
+				filepath.Join(ext.ModuleDir, "go.mod"), ext.Requires, o.RuntimeVersion)
+		}
+	}
+	cmd := exec.CommandContext(ctx, o.Go, "build", "-tags", "nogui", "-o", os.DevNull, ext.ImportPath) // #nosec G204 -- the go command, on the package the config names
+	cmd.Dir = ext.ModuleDir
+	cmd.Env = append(append(os.Environ(), o.Env...), "CGO_ENABLED=0")
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("extension: %s does not build without the wizard (go build -tags nogui, no cgo), which a --cli-only installer needs; "+
+			"put what imports Fyne in files with //go:build !nogui:\n%s", ext.ImportPath, strings.TrimSpace(out.String()))
+	}
+	return nil
+}
+
+// runCheck runs the installer's own check of its extension.
+func runCheck(ctx context.Context, installer string) error {
+	cmd := exec.CommandContext(ctx, installer, "--check-extension") // #nosec G204 -- the installer this build has just made
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s (%w)", strings.TrimSpace(out.String()), err)
+	}
+	return nil
+}

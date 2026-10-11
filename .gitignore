@@ -8,3 +8,5 @@ coverage.out
 /examples/greet/dist/
 /examples/beacon/bin/
 /examples/beacon/dist/
+/examples/keyed/bin/
+/examples/keyed/dist/

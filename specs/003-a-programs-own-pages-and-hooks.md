@@ -4,12 +4,30 @@
 
 ## Status: INCOMPLETE
 
-The design was agreed on 2026-10-09. Implementation follows spec 002
-phase 3 and spec 001 phase 5, unless it is brought forward.
+The design was agreed on 2026-10-09. It was brought forward on 2026-10-11
+for hayami, whose installer checks for LibreHardwareMonitor and offers to
+set it up: both phases landed then, except what "What is not in yet" lists.
 
 ## Executive Summary
 
-Populated before the first PR is opened.
+`extension: ./installer` in `fynstall.yaml` names a Go package of the
+program's own. The builder links it into the installer and the
+uninstaller. It adds pages among the wizard's, each with a command-line
+path, and runs hooks before and after an install and an uninstall. The
+build stops when the package does not build without the wizard, is
+written for another fynstall, or has a page with no window.
+`examples/keyed` is the example and what the tests install.
+
+## What is not in yet
+
+- **`Licence`.** An extension cannot supply the licence text. The command
+  line shows no licence at all today, so the hook needs that first.
+- **R5, secrets.** A secret parameter set by a page is handled as any
+  secret parameter is, and no test passes one through an extension.
+- **The examples.** The spec names `greet` and `hello`. The example is a
+  new program, `examples/keyed`, so that the tests of the other two do not
+  change.
+- **Linux.** Written and unrun: see Verification.
 
 ## Context
 
@@ -71,7 +89,12 @@ These come before the API, because the API exists to keep them.
   `github.com/ushineko/fynstall/extension`. The fynstall version that the
   generated build selects must be the builder's runtime version (spec 001,
   R5); a mismatch stops the build and names both versions.
-- R3 **The core API**, in package `extension`, with no Fyne import:
+- R3 **The core API**, in package `extension`, with no Fyne import. As
+  built it differs in four places: there is no `Licence` yet; `Prompter`
+  also has `Say`, for a page that says what it found before it asks; a
+  `Context` has `App`, `Scope`, `Upgrade` and `Logf` as well; and a page
+  goes only between the welcome and the summary, because the summary makes
+  the plan from what the pages set.
 
   ```go
   // Extension is what a program's installer package exports, as a variable
@@ -158,31 +181,48 @@ These come before the API, because the API exists to keep them.
 
 Phase 1:
 
-- [ ] R1 A config with `extension:` builds both variants; the generated
-      `go.mod` has the module and its `replace`; a missing package or
-      module is a config error with its line.
-- [ ] R2 An extension that requires another fynstall version stops the
-      build with both versions named.
+- [x] R1 A config with `extension:` builds both variants; a missing
+      package or module is a config error with its line
+      (`TestAnExtensionIsAPackageInsideAModule`, and the builds of
+      `examples/keyed`). An extension inside fynstall's own module, as the
+      example is, needs no `replace` of its own.
+- [x] R2 An extension that requires another fynstall version stops the
+      build with both versions named
+      (`TestAnExtensionForAnotherFynstallStopsTheBuild`).
 - [ ] R3 `Licence` replaces `app.licence` in the wizard and the CLI; its
-      error stops the install with the error shown.
-- [ ] R3/R6 `BeforeInstall` runs before the first change and its error
+      error stops the install with the error shown. Not in yet.
+- [x] R3/R6 `BeforeInstall` runs before the first change and its error
       leaves the home unchanged; `AfterInstall` runs after the receipt is
       written; `BeforeUninstall` runs from the *installed* uninstaller
-      before any file is removed, and its error stops the uninstall.
+      before any file is removed
+      (`TestAProgramsHooksRunAroundTheInstallAndTheUninstall`,
+      `TestAHookThatRefusesStopsTheInstallWithNothingChanged`, and in the
+      wizard `TestAProgramsOwnPageSetsAParameterAndItsHooksRun`). For an
+      install for everyone the hooks run in the helper; no test runs that
+      path.
 - [ ] R5 A secret set by an extension appears in no output and no file
       but its config file (the leak test of spec 002, extended).
-- [ ] R7 `--dry-run` lists the hooks.
+- [x] R7 `--dry-run` lists the hooks
+      (`TestADryRunListsTheHooksAndRunsNone`); the summary page has a row
+      for each.
 - [ ] Desk check as in Phases.
 
 Phase 2:
 
-- [ ] R3 A page placed `After("licence")` appears there in the wizard and
-      is passed on the command line in the same order.
-- [ ] The CLI rule: a page whose parameters are all given is skipped; a
-      silent install missing one stops and names the flag.
-- [ ] The nogui rule: an extension whose core package imports Fyne fails
-      the `--cli-only` build, naming the file.
-- [ ] R4 A page with no GUI fails the full build, naming the page.
+- [x] R3 A page placed `After("licence")` appears there in the wizard and
+      is passed on the command line in the same order
+      (`TestAProgramsOwnPageSetsAParameterAndItsHooksRun`,
+      `TestPagesArePassedInTheWizardsOrder`).
+- [x] The CLI rule: a page whose parameters are all given is skipped; a
+      silent install missing one stops and names the flag
+      (`TestTheCommandLinePassesAPageByTheRule`,
+      `TestASilentInstallNamesTheFlagAPageNeeds`).
+- [x] The nogui rule: an extension whose core package needs the wizard
+      fails the build, with the go command's own message
+      (`TestAnExtensionThatNeedsTheWizardToBuildStopsTheBuild`).
+- [x] R4 A page with no window is named by the installer's own check,
+      which the builder runs on the installer it has built
+      (`TestAPageWithNoWindowIsNamed`).
 - [ ] Desk check as in Phases.
 
 ## Risks & Assumptions
@@ -223,4 +263,14 @@ Phase 2:
 
 ## Verification
 
-Filled in as each phase lands.
+2026-10-11, Windows 11, Go 1.27, both phases: `go test ./...` passes with
+cgo, including the tests named above. `examples/keyed` builds as a full
+installer and as a `--cli-only` one, and each passes its own
+`--check-extension`.
+
+One fault was found by the integration test and fixed before it landed: a
+silent install with no value for a page's required parameter went ahead,
+because the command line dropped the page's error.
+
+Not run: Linux (the tests build there, by `go vet` for `GOOS=linux`), an
+install for everyone with hooks, and the desk checks of both phases.

@@ -75,6 +75,18 @@ func (p *Plan) addShellIntegration(vars map[string]string) error {
 		}
 		ps.Exists = exists
 		p.Shortcuts = append(p.Shortcuts, ps)
+		if d.Autostart {
+			// The same shortcut in the Startup folder, which Windows runs
+			// when the person logs in (spec 005).
+			startup := platform.StartupDir(vars)
+			auto := ps
+			auto.Dst, auto.Exists = filepath.Join(startup, platform.ShortcutName(d.Name)), false
+			if auto.Exists, err = p.check(auto.Dst, auto.Base); err != nil {
+				return err
+			}
+			p.Shortcuts = append(p.Shortcuts, auto)
+			p.Autostart = append(p.Autostart, d.Name)
+		}
 	}
 
 	// The uninstaller, as Settings > Apps starts it. Started there it has

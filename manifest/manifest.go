@@ -167,6 +167,8 @@ type Desktop struct {
 	Categories []string `json:"categories,omitempty"`
 	Terminal   bool     `json:"terminal,omitempty"`
 	Icon       bool     `json:"icon,omitempty"`
+	// Autostart starts the program at login (spec 005).
+	Autostart bool `json:"autostart,omitempty"`
 	// GenericName, Keywords, StartupNotify and StartupWMClass go into the
 	// entry as written; StartupNotify is nil when the config did not say.
 	GenericName    string   `json:"generic_name,omitempty"`

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -24,6 +25,8 @@ import (
 	"github.com/ushineko/fynedesygn/wizard"
 
 	"github.com/ushineko/fynstall/engine"
+	"github.com/ushineko/fynstall/extension"
+	xgui "github.com/ushineko/fynstall/extension/gui"
 	"github.com/ushineko/fynstall/manifest"
 	"github.com/ushineko/fynstall/platform"
 )
@@ -78,13 +81,36 @@ type installWizard struct {
 	deferred []string
 	// uninstalling is true when the person chose "Uninstall instead".
 	uninstalling bool
+	// ext is the program's own installer code (spec 003), xc what it sees,
+	// and xparams the values of the parameters its pages set. xlog is
+	// where its log lines go: the progress page's log once the job runs.
+	ext     *extension.Extension
+	xc      *extension.Context
+	xparams map[string]string
+	xlog    func(extension.Level, string)
+}
+
+// placed is a page and its rank among the wizard's pages (spec 003).
+type placed struct {
+	rank float64
+	page wizard.Page
 }
 
 // newInstallWizard builds the pages from the manifest (spec 001 phase 4):
 // Welcome, Licence, Settings, Location, Ready, Installing, Done. A page
 // with nothing to show is left out.
 func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*installWizard, error) {
-	g := &installWizard{m: m, p: p, f: f, e: e, scope: f.scope, dirs: map[string]*scopedDir{}}
+	g := &installWizard{m: m, p: p, f: f, e: e, scope: f.scope, dirs: map[string]*scopedDir{}, ext: p.Extension, xparams: map[string]string{}}
+	g.xc = installContext(m, func() string { return g.scope }, func() string {
+		if g.plan == nil {
+			return "" // not chosen until the summary has made the plan
+		}
+		return g.plan.Root
+	}, g.xparams, func(l extension.Level, text string) {
+		if g.xlog != nil {
+			g.xlog(l, text)
+		}
+	})
 	g.options = wizard.Options{
 		AppID: m.App.ID + ".installer",
 		Name:  m.App.Name + " " + m.App.Version,
@@ -94,7 +120,8 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 	if err != nil {
 		return nil, err
 	}
-	var pages []wizard.Page
+	var pages []placed
+	add := func(id string, page wizard.Page) { pages = append(pages, placed{extension.Rank(id), page}) }
 	if ix != nil {
 		g.existing = ix
 		if g.old, err = readExisting(ix); err != nil {
@@ -108,26 +135,37 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 		if !needsElevation(g.scope, g.e.Getenv) {
 			g.deferred = nil
 		}
-		pages = append(pages, &replacePage{g: g})
+		add(extension.PageWelcome, &replacePage{g: g})
 	} else {
-		pages = append(pages, wizard.Welcome("Welcome", g.welcome()))
+		add(extension.PageWelcome, wizard.Welcome("Welcome", g.welcome()))
 	}
 	if m.Licence != "" {
-		pages = append(pages, wizard.Licence(m.Licence))
+		add(extension.PageLicence, wizard.Licence(m.Licence))
 	}
-	if len(m.Parameters) > 0 {
-		page, err := g.parametersPage()
-		if err != nil {
-			return nil, err
+	initial, err := g.initialValues()
+	if err != nil {
+		return nil, err
+	}
+	paged := g.ext.Sets()
+	for _, name := range paged {
+		g.xparams[name] = initial[name]
+	}
+	if len(m.Parameters) > len(paged) {
+		add(extension.PageSettings, g.parametersPage(initial, paged))
+	}
+	for _, xp := range orderedPages(g.ext) {
+		build, ok := xgui.Lookup(xp.ID)
+		if !ok {
+			return nil, fmt.Errorf("its page %s has no window", xp.ID)
 		}
-		pages = append(pages, page)
+		pages = append(pages, placed{xp.At.Rank(), build(g.xc)})
 	}
 	scopes, err := offeredScopes(m, e.Getenv)
 	if err != nil {
 		return nil, err
 	}
 	if len(scopes) > 1 && g.old == nil {
-		pages = append(pages, &scopePage{g: g})
+		add(extension.PageLocation, &scopePage{g: g})
 	}
 	for _, scope := range scopes {
 		if g.old != nil {
@@ -146,17 +184,22 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 			return nil
 		})}
 		g.dirs[scope] = d
-		pages = append(pages, d)
+		add(extension.PageLocation, d)
 	}
-	pages = append(pages, &summaryPage{g: g})
-	pages = append(pages, wizard.Progress("Installing", engine.ManifestSteps(m, g.existing != nil), m.App.Name+" is installed.", g.job).WithBar())
+	add(extension.PageSummary, &summaryPage{g: g})
+	add(extension.PageInstalling, wizard.Progress("Installing", engine.ManifestSteps(m, g.existing != nil), m.App.Name+" is installed.", g.job).WithBar())
 	var checks []*widget.Check
 	if m.Launch != "" {
 		g.launch = widget.NewCheck(LaunchNow, nil)
 		checks = append(checks, g.launch)
 	}
-	pages = append(pages, wizard.Finish("Done", g.finishText(), checks...))
-	g.options.Pages = pages
+	add(extension.PageFinish, wizard.Finish("Done", g.finishText(), checks...))
+	// The program's own pages go among these by rank; pages of one rank
+	// keep the order they were added in.
+	sort.SliceStable(pages, func(i, j int) bool { return pages[i].rank < pages[j].rank })
+	for _, pl := range pages {
+		g.options.Pages = append(g.options.Pages, pl.page)
+	}
 	return g, nil
 }
 
@@ -185,15 +228,14 @@ func (g *installWizard) finishText() string {
 		g.m.App.Name, g.m.App.Version)
 }
 
-// parametersPage is a form with a field per parameter, filled from the
-// flags, the side file and the defaults; a secret is a password entry.
-func (g *installWizard) parametersPage() (wizard.Page, error) {
+// initialValues is what each parameter starts as: from the flags, the side
+// file, the installed version, or its default.
+func (g *installWizard) initialValues() (map[string]string, error) {
 	side, err := readSideFile(g.e.ExeDir, g.m)
 	if err != nil {
 		return nil, err
 	}
 	initial := map[string]string{}
-	var fields []*forms.Field
 	for _, p := range g.m.Parameters {
 		v, ok := g.f.params[p.Name]
 		if !ok {
@@ -206,6 +248,19 @@ func (g *installWizard) parametersPage() (wizard.Page, error) {
 			v = p.Default
 		}
 		initial[p.Name] = v
+	}
+	return initial, nil
+}
+
+// parametersPage is a form with a field per parameter, filled from
+// initial; a secret is a password entry. A parameter that a page of the
+// program's own sets (paged) has no field here: its page asks.
+func (g *installWizard) parametersPage(initial map[string]string, paged []string) wizard.Page {
+	var fields []*forms.Field
+	for _, p := range g.m.Parameters {
+		if slices.Contains(paged, p.Name) {
+			continue
+		}
 		if p.Secret {
 			entry := widget.NewPasswordEntry()
 			if slices.Contains(g.deferred, p.Name) {
@@ -222,12 +277,15 @@ func (g *installWizard) parametersPage() (wizard.Page, error) {
 	return wizard.Form("Settings", g.form, initial, func() bool {
 		vals := g.form.Values()
 		for _, p := range g.m.Parameters {
+			if slices.Contains(paged, p.Name) {
+				continue
+			}
 			if p.Required && strings.TrimSpace(vals[p.Name]) == "" && !slices.Contains(g.deferred, p.Name) {
 				return false
 			}
 		}
 		return true
-	}), nil
+	})
 }
 
 // params are the values on the settings page, with empty ones taking the
@@ -238,8 +296,12 @@ func (g *installWizard) params() map[string]string {
 	if g.form != nil {
 		vals = g.form.Values()
 	}
+	paged := g.ext.Sets()
 	for _, p := range g.m.Parameters {
 		v := vals[p.Name]
+		if slices.Contains(paged, p.Name) {
+			v = g.xparams[p.Name]
+		}
 		if v == "" {
 			v = p.Default
 		}
@@ -273,6 +335,9 @@ func (s *summaryPage) Enter(w *wizard.Wizard) {
 		o.Root = g.dirs[g.scope].Value()
 	}
 	g.plan, g.planErr = engine.NewPlan(g.m, o)
+	if g.planErr == nil {
+		g.planErr = requiredAfterPages(g.m, g.ext, o.Params)
+	}
 	s.box.Objects = nil
 	if g.planErr != nil {
 		w.SetMessage(g.planErr.Error(), fd.StatusBad)
@@ -304,6 +369,9 @@ func (s *summaryPage) Enter(w *wizard.Wizard) {
 	for _, d := range g.m.Desktop {
 		rows = append(rows, widgets.PlainRow("Launcher entry", d.Name))
 	}
+	for _, name := range g.plan.Autostart {
+		rows = append(rows, widgets.PlainRow("Starts at login", name))
+	}
 	for _, f := range g.plan.Files {
 		if f.Source == engine.FromContent && !strings.HasSuffix(f.Dst, ".desktop") {
 			rows = append(rows, widgets.PlainRow("Settings file", f.Dst))
@@ -318,6 +386,9 @@ func (s *summaryPage) Enter(w *wizard.Wizard) {
 			label, text = "On uninstall", strings.TrimPrefix(a, "on uninstall, ")
 		}
 		rows = append(rows, widgets.PlainRow(gloss[label], strings.TrimSpace(text)))
+	}
+	for _, h := range installHookLines(g.ext, g.m.App.Name) {
+		rows = append(rows, widgets.PlainRow("Its own code", h))
 	}
 	s.box.Objects = rows
 	s.box.Refresh()
@@ -477,6 +548,19 @@ func (g *installWizard) job(ctx context.Context, r *wizard.Reporter) error {
 			r.Progress(fraction, countsText(ev.Counts), g.short(ev.Text))
 		}
 	}
+	g.xlog = func(lv extension.Level, text string) {
+		level := logpane.Info
+		if lv == extension.Warn {
+			level = logpane.Warn
+		}
+		r.Log(level, text)
+	}
+	// For an install for everyone the hooks run in the helper (R6).
+	if !elevate {
+		if err := beforeInstall(ctx, g.ext, g.xc); err != nil {
+			return err
+		}
+	}
 	switch {
 	case elevate:
 		if err := applyRequest(ctx, g.plan, true, g.e, report); err != nil {
@@ -493,6 +577,11 @@ func (g *installWizard) job(ctx context.Context, r *wizard.Reporter) error {
 	}
 	if last >= 0 {
 		r.Finish(last, "")
+	}
+	if !elevate {
+		if err := afterInstall(ctx, g.ext, g.xc); err != nil {
+			return err
+		}
 	}
 	if g.plan.RefreshMenu {
 		refreshMenu(report)
@@ -608,8 +697,8 @@ func notice(title, text string) {
 
 // uninstallGUI asks once, removes, and reports, in one small window
 // (fynedesygn spec 062). skip is --yes: the window shows only the result.
-func uninstallGUI(r *engine.Receipt, skip bool, env func(string) string) int {
-	o, done := uninstallConfirm(r, skip, env)
+func uninstallGUI(r *engine.Receipt, skip bool, env func(string) string, ext *extension.Extension) int {
+	o, done := uninstallConfirm(r, skip, env, ext)
 	res := wizard.RunConfirm(o)
 	done()
 	if res.Outcome != wizard.Finished {
@@ -626,7 +715,7 @@ func uninstallGUI(r *engine.Receipt, skip bool, env func(string) string) int {
 // helper waits after the uninstall while the window asks about the
 // leftovers, so the person is asked for an administrator once. done ends a
 // helper the window left waiting.
-func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) (wizard.ConfirmOptions, func()) {
+func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string, ext *extension.Extension) (wizard.ConfirmOptions, func()) {
 	var left []engine.Leftover
 	var h *helper
 	done := func() {
@@ -641,6 +730,9 @@ func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) (wi
 	}
 	for _, hk := range r.Hooks {
 		detail += fmt.Sprintf("\n\nBefore removing anything, it runs `%s`.", commandLine(hk.Exec, hk.Args))
+	}
+	for _, line := range uninstallHookLines(ext, r.App.Name) {
+		detail += "\n\n" + line
 	}
 	for _, k := range r.Keep {
 		detail += fmt.Sprintf("\n\nYour data in `%s`, if any, is left where it is.", k)
@@ -666,8 +758,16 @@ func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) (wi
 			return err
 		}
 		defer unlock()
-		left, err = engine.Uninstall(r, engine.ReasonUninstall, report)
-		return err
+		// The program's own hooks, around the removal (spec 003). An
+		// install for everyone runs them in its helper, above.
+		xc := uninstallContext(r, engine.ReasonUninstall, nil)
+		if err := beforeUninstall(ctx, ext, xc); err != nil {
+			return err
+		}
+		if left, err = engine.Uninstall(r, engine.ReasonUninstall, report); err != nil {
+			return err
+		}
+		return afterUninstall(ctx, ext, xc)
 	}
 	return wizard.ConfirmOptions{
 		AppID:    r.App.ID + ".uninstaller",
@@ -718,6 +818,21 @@ func leftoversDetail(left []engine.Leftover) string {
 		fmt.Fprintf(&b, "- `%s`\n", l)
 	}
 	return b.String()
+}
+
+// pagesWithoutWindow are the IDs of ext's pages that no window is
+// registered for (spec 003 R4).
+func pagesWithoutWindow(ext *extension.Extension) []string {
+	var out []string
+	if ext == nil {
+		return nil
+	}
+	for _, p := range ext.Pages {
+		if _, ok := xgui.Lookup(p.ID); !ok {
+			out = append(out, p.ID)
+		}
+	}
+	return out
 }
 
 // gloss labels the summary rows of the actions by the word actionLines

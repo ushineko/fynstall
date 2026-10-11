@@ -39,6 +39,10 @@ type Config struct {
 	UI          UI          `yaml:"ui"`
 	CLI         CLI         `yaml:"cli"`
 	Targets     []string    `yaml:"targets"`
+	// Extension is the directory of a Go package of the program's own,
+	// relative to the config, that the builder links into the installer
+	// and the uninstaller: wizard pages and hooks (spec 003).
+	Extension string `yaml:"extension"`
 }
 
 // CLI is what the installer takes on its command line beyond its own flags.
@@ -262,6 +266,10 @@ type Desktop struct {
 	Args       []string `yaml:"args"`
 	Categories []string `yaml:"categories"`
 	Terminal   bool     `yaml:"terminal"`
+	// Autostart starts the entry's program when its user logs in (spec
+	// 005): an XDG autostart entry on Linux, a shortcut in the Startup
+	// folder on Windows.
+	Autostart bool `yaml:"autostart"`
 	// GenericName says what kind of program it is, such as "Wallpaper
 	// manager"; Keywords are what a launcher's search matches.
 	GenericName string   `yaml:"generic_name"`

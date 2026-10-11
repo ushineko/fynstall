@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ushineko/fynstall/engine"
+	"github.com/ushineko/fynstall/extension"
 	"github.com/ushineko/fynstall/manifest"
 )
 
@@ -315,12 +316,21 @@ func applyPlan(file string, m *manifest.Manifest, p Payload, e Env) int {
 	}
 	ctx, cancel := cancelOnEOF(e.In)
 	defer cancel()
+	// The program's own hooks run here, where the changes are made, with
+	// the rights the changes are made with (spec 003 R6).
+	xc := installContext(m, fixed(plan.Scope), fixed(plan.Root), plan.Params, eventLog(out.report))
+	if err := beforeInstall(ctx, p.Extension, xc); err != nil {
+		return out.fail(err)
+	}
 	if old != nil {
 		if err := replace(ctx, plan, old, p, e.Getenv, l, out.report); err != nil {
 			return out.fail(err)
 		}
 	} else if _, err := engine.Apply(ctx, plan, p.Files, p.Uninstaller, out.report); err != nil {
 		return out.fail(fmt.Errorf("install failed, and the changes were undone: %w", err))
+	}
+	if err := afterInstall(ctx, p.Extension, xc); err != nil {
+		return out.fail(err)
 	}
 	out.send(wire{Kind: "done"})
 	return exitOK
@@ -330,16 +340,23 @@ func applyPlan(file string, m *manifest.Manifest, p Payload, e Env) int {
 // the install r. With removeLeftovers it removes the leftovers too;
 // otherwise it reports them and waits for the parent's answer, so the
 // person is asked once for an administrator, not twice.
-func applyUninstall(r *engine.Receipt, removeLeftovers bool, why engine.Reason, e Env) int {
+func applyUninstall(r *engine.Receipt, removeLeftovers bool, why engine.Reason, e Env, ext *extension.Extension) int {
 	out := newHelperOut(e.Out)
 	unlock, err := engine.Lock(r.App.ID, r.Scope, e.Getenv)
 	if err != nil {
 		return out.fail(err)
 	}
 	defer unlock()
+	xc := uninstallContext(r, why, eventLog(out.report))
+	if err := beforeUninstall(context.Background(), ext, xc); err != nil {
+		return out.fail(err)
+	}
 	left, err := engine.Uninstall(r, why, out.report)
 	if err != nil {
 		return out.fail(err)
+	}
+	if err := afterUninstall(context.Background(), ext, xc); err != nil {
+		out.report(engine.Event{Kind: engine.Warn, Text: err.Error(), Step: -1})
 	}
 	// An upgrade leaves the leftovers where they are, without asking: the
 	// new version installs among them.

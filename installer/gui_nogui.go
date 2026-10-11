@@ -4,6 +4,7 @@ package installer
 
 import (
 	"github.com/ushineko/fynstall/engine"
+	"github.com/ushineko/fynstall/extension"
 	"github.com/ushineko/fynstall/manifest"
 )
 
@@ -17,4 +18,9 @@ func installGUI(*manifest.Manifest, Payload, installFlags, Env) int { return exi
 func notice(string, string) {}
 
 // uninstallGUI is never reached, for the same reason.
-func uninstallGUI(*engine.Receipt, bool, func(string) string) int { return exitUsage }
+func uninstallGUI(*engine.Receipt, bool, func(string) string, *extension.Extension) int {
+	return exitUsage
+}
+
+// pagesWithoutWindow is never asked: a CLI-only build has no windows.
+func pagesWithoutWindow(*extension.Extension) []string { return nil }

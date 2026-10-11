@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ushineko/fynstall/engine"
+	"github.com/ushineko/fynstall/extension"
 	"github.com/ushineko/fynstall/manifest"
 )
 
@@ -30,6 +31,8 @@ type Payload struct {
 	Files fs.FS
 	// Uninstaller is the uninstaller binary built for the same target.
 	Uninstaller []byte
+	// Extension is the program's own installer code, or nil (spec 003).
+	Extension *extension.Extension
 }
 
 // Env is the process an installer runs in; tests supply their own.
@@ -72,10 +75,15 @@ func Main(p Payload) {
 }
 
 // UninstallMain runs the uninstaller with the process's arguments and exits.
-// app is the program it belongs to, compiled in by the builder.
-func UninstallMain(app manifest.App) {
+// app is the program it belongs to, compiled in by the builder, and ext its
+// own installer code, when it has any (spec 003).
+func UninstallMain(app manifest.App, ext ...*extension.Extension) {
 	args, e := helperChannel(os.Args[1:], processEnv())
-	os.Exit(Uninstall(args, app, e))
+	var x *extension.Extension
+	if len(ext) > 0 {
+		x = ext[0]
+	}
+	os.Exit(UninstallWith(args, app, x, e))
 }
 
 func processEnv() Env {
