@@ -110,6 +110,12 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- NSIS-compatible switches (spec 002 L1): with `cli: { compat: nsis }` an
+  installer also takes `/S`, `/D=<directory>` and `/<Name>=<value>` for each
+  parameter, and turns each into its own flag, so what ran a program's NSIS
+  installer runs the new one unchanged
+  ([#6](https://github.com/ushineko/fynstall/issues/6)).
+
 - Services on Windows (spec 001 phase 7d, spec 002 D2a): a `service`
   action registers a service with the Windows service manager, running as
   LocalSystem, started with the computer, with recovery actions for

@@ -45,6 +45,7 @@ var (
 	v1Again   builder.Artifact
 	v2Art     builder.Artifact // differs only in its stamped runtime version
 	greet020  builder.Artifact // app version 0.2.0: an upgrade
+	greetNSIS builder.Artifact // cli.compat: nsis
 	twoScopes builder.Artifact // a config that offers user and system scope
 	shell     builder.Artifact // a launcher entry, an icon, a link and a publisher
 	shellFull builder.Artifact // the same, with the wizard
@@ -133,6 +134,15 @@ func setup(work string) error {
 		return err
 	}
 	if greet020, err = one(newer, v1, "greet-0.2.0"); err != nil {
+		return err
+	}
+
+	// The same program with the switches of the NSIS installer it replaces.
+	compat := filepath.Join(src, "fynstall-nsis.yaml")
+	if err := os.WriteFile(compat, append(b, []byte("\ncli:\n  compat: nsis\n")...), 0o600); err != nil {
+		return err
+	}
+	if greetNSIS, err = one(compat, v1, "greet-nsis"); err != nil {
 		return err
 	}
 
@@ -777,4 +787,42 @@ func TestAServiceIsRegisteredForEveryoneAndRemovedBeforeItsProgram(t *testing.T)
 	require.Less(t, hook, service, "the hook runs before anything is removed")
 	require.Less(t, service, removed, "the service goes before its program")
 	require.Equal(t, before, h.snap(t), "the machine's folders and registry are as they were")
+}
+
+// With cli.compat: nsis, what ran the NSIS installer of a program runs this
+// one unchanged: /S, /<Name>=<value>, and /D= with a directory that has a
+// space and no quotes (spec 002 L1). Without the key, a switch is refused.
+func TestAnInstallerTakesTheSwitchesOfTheNSISInstallerItReplaces(t *testing.T) {
+	h := greetHome(t)
+	before := h.snap(t)
+	dir := filepath.Join(h.dir, "My Programs", "Greet")
+
+	code, out := h.run(t, greetNSIS.Installer, "/S", "/Name=Ada", "/GREETING=hi", "/D="+filepath.Join(h.dir, "My"), `Programs\Greet`)
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "Installed Greet 0.1.0 in "+dir)
+	b, err := os.ReadFile(h.config())
+	require.NoError(t, err)
+	require.JSONEq(t, `{"greeting":"hi","name":"Ada","token":""}`, string(b))
+
+	// The self-update of the program it replaces: the new installer, run
+	// silently, replaces the install where it is and keeps what it was given.
+	code, out = h.run(t, greetNSIS.Installer, "/S")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "Repairs Greet 0.1.0")
+	b, err = os.ReadFile(h.config())
+	require.NoError(t, err)
+	require.JSONEq(t, `{"greeting":"hi","name":"Ada","token":""}`, string(b))
+
+	code, out = h.run(t, greetNSIS.Installer, "/NCRC", "/S")
+	require.Equal(t, 2, code, out)
+	require.Contains(t, out, "/NCRC is not a switch of this installer")
+
+	code, out = h.run(t, filepath.Join(dir, "uninstall.exe"), "--yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
+
+	code, out = h.run(t, v1Art.Installer, "/S")
+	require.Equal(t, 2, code, "an installer without the key has only its own flags")
+	require.Contains(t, out, `"/S" is not a flag of this installer`)
+	require.Equal(t, before, h.snap(t))
 }
