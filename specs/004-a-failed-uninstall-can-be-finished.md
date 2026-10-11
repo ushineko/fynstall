@@ -2,10 +2,7 @@
 
 **Issue**: [#33](https://github.com/ushineko/fynstall/issues/33)
 
-## Status: INCOMPLETE
-
-The code and the automated tests are done on Windows and Linux. The desk check
-on Windows is open; see Acceptance Criteria.
+## Status: COMPLETE
 
 ## Executive Summary
 
@@ -121,7 +118,7 @@ Not in this spec:
   (`builder`: `TestAFailedRepairCanBeRunAgainAndFinishes`,
   `TestForceReceiptUninstallFindsAnInstallWithNoIndexEntry`; both fail
   with the engine and installer of `dc0aa5a`).
-- [ ] Desk check on Windows: the repair of the consuming project that
+- [x] Desk check on Windows: the repair of the consuming project that
   failed in issue #33 succeeds, or fails and can be run again.
 
 ## Risks & Assumptions
@@ -202,6 +199,12 @@ CachyOS amd64, Go 1.26.0, in a worktree of the branch at `ac1bd1f`.
   among them.
 - `make lint` (golangci-lint v2.12.2) reports 0 issues.
 - `make vuln` (govulncheck) reports no vulnerabilities.
+
+### Desk check (2026-10-11)
+
+The maintainer ran the repair of the consuming project from issue #33 on
+Windows with an installer built from this branch, and reported it fixed.
+No output was pasted.
 
 ### Gates
 
