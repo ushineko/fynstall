@@ -4,8 +4,8 @@
 
 ## Status: INCOMPLETE
 
-The code and the automated tests are done. The Linux run and the desk check
-are open; see Acceptance Criteria.
+The code and the automated tests are done on Windows and Linux. The desk check
+on Windows is open; see Acceptance Criteria.
 
 ## Executive Summary
 
@@ -112,7 +112,7 @@ Not in this spec:
   removed by `--force-receipt-uninstall`, and the profile is as it was
   (`builder`: `TestAnInstallWithNoIndexEntryIsRemovedByItsRecord`).
 - [x] `go test ./...` and the linter pass on Windows.
-- [ ] `make test` and `make lint` pass on Linux.
+- [x] `make test` and `make lint` pass on Linux.
 - [ ] Desk check on Windows: the repair of the consuming project that
   failed in issue #33 succeeds, or fails and can be run again.
 
@@ -180,9 +180,22 @@ the uninstaller printed "removed" for the index entry, the config file,
 the file because it is being used by another process", and `uninstall.exe`
 was gone.
 
-Linux was compiled from Windows (`GOOS=linux go vet -tags nogui`) and not
-run. The real `HKCU` Uninstall key and `Path` were read after the tests and
+The real `HKCU` Uninstall key and `Path` were read after the tests and
 hold nothing from them.
 
-Gates: no dependency changed. The security review found one point, R4.1,
+### Linux (2026-10-11)
+
+CachyOS amd64, Go 1.26.0, in a worktree of the branch at `ac1bd1f`.
+
+- `go build ./...` with cgo, `go build -tags nogui ./...` and `go vet ./...`
+  report nothing.
+- `make test` (`go test -race ./...`) passes in all 10 packages, with
+  `TestAnUninstallThatFailsLeavesItsRecordItsIndexEntryAndItsUninstaller`
+  among them.
+- `make lint` (golangci-lint v2.12.2) reports 0 issues.
+- `make vuln` (govulncheck) reports no vulnerabilities.
+
+### Gates
+
+No dependency changed. The security review found one point, R4.1,
 which the design answers. The change is code only; see Rollback.
