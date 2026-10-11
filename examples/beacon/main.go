@@ -4,6 +4,7 @@ install-time actions install (spec 002 phase 4a). It is pure Go with no
 cgo.
 
 	beacon serve           run as a service: say it is alive now and then
+	                       (a systemd unit, or a Windows service)
 	beacon setup <file>    a run action: write file
 	beacon teardown <file> its undo: remove file, and its directory if empty
 	beacon goodbye         an uninstall hook: say it ran
@@ -38,7 +39,7 @@ func run(args []string, out io.Writer) error {
 	}
 	switch args[0] {
 	case "serve":
-		return serve(out, 30*time.Second)
+		return serveAs(out, 30*time.Second)
 	case "setup":
 		if len(args) != 2 {
 			return errors.New("usage: beacon setup <file>")
@@ -59,7 +60,9 @@ func run(args []string, out io.Writer) error {
 	return fmt.Errorf("unknown command %q", args[0])
 }
 
-func serve(out io.Writer, every time.Duration) error {
+// serve says it is alive until a signal or asked stops it. asked is nil
+// except under the Windows service manager, which sends no signal.
+func serve(out io.Writer, every time.Duration, asked <-chan struct{}) error {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, os.Interrupt)
 	t := time.NewTicker(every)
@@ -68,6 +71,9 @@ func serve(out io.Writer, every time.Duration) error {
 	for {
 		select {
 		case <-stop:
+			_, _ = fmt.Fprintln(out, "beacon: stopping")
+			return nil
+		case <-asked:
 			_, _ = fmt.Fprintln(out, "beacon: stopping")
 			return nil
 		case <-t.C:

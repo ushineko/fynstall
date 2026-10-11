@@ -110,6 +110,16 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- Services on Windows (spec 001 phase 7d, spec 002 D2a): a `service`
+  action registers a service with the Windows service manager, running as
+  LocalSystem, started with the computer, with recovery actions for
+  `restart`. Only an install for everyone has one. The uninstaller stops
+  the service and waits for its process before it removes the program. A
+  service of the same name that is there already stops the install.
+  `examples/beacon` runs as a Windows service and builds for Windows from
+  the same config ([#1](https://github.com/ushineko/fynstall/issues/1),
+  [#6](https://github.com/ushineko/fynstall/issues/6)).
+
 - The version and the manifest of a Windows installer (spec 001 phase 7d,
   spec 002 L7): an installer and an uninstaller for Windows carry a version
   resource made from `app` (name, version, publisher), which Properties >

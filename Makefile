@@ -110,7 +110,7 @@ greet: ## Build examples/greet for each target into examples/greet/build/
 
 .PHONY: beacon
 beacon: ## Build examples/beacon into examples/beacon/bin/, for the actions example
-	CGO_ENABLED=0 go build $(GOFLAGS) -o examples/beacon/bin/beacon ./examples/beacon
+	CGO_ENABLED=0 go build $(GOFLAGS) -o examples/beacon/bin/beacon$(shell go env GOEXE) ./examples/beacon
 
 .PHONY: tidy
 tidy: ## go mod tidy

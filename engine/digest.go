@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
+	"github.com/ushineko/fynstall/platform"
 )
 
 // Digest is the sha256 of everything p will change. The privileged helper
@@ -30,6 +32,8 @@ func (p *Plan) digest(state bool) (string, error) {
 	type action struct {
 		Service, Unit, Content string
 		Start, Exists          bool
+		Key                    string
+		Def                    platform.ServiceDef
 		Exec                   string
 		Args, Undo             []string
 		NoUndo                 bool
@@ -77,7 +81,7 @@ func (p *Plan) digest(state bool) (string, error) {
 		case a.Service != nil:
 			s := a.Service
 			sum := sha256.Sum256(s.Content)
-			d.Actions = append(d.Actions, action{Service: s.Name, Unit: s.Unit, Content: hex.EncodeToString(sum[:]), Start: s.Start, Exists: state && s.Exists})
+			d.Actions = append(d.Actions, action{Service: s.Name, Unit: s.Unit, Content: hex.EncodeToString(sum[:]), Start: s.Start, Exists: state && s.Exists, Key: s.Key, Def: s.Def})
 		case a.Run != nil:
 			r := a.Run
 			d.Actions = append(d.Actions, action{Exec: r.Exec, Args: r.Args, Undo: r.Undo, NoUndo: r.NoUndo})

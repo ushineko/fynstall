@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -152,4 +153,108 @@ func TestPathListsAreComparedAsWindowsComparesPaths(t *testing.T) {
 	list, _ = platform.PathList(`C:\A;`, `C:\x`)
 	require.Equal(t, `C:\A;C:\x`, list, "no empty entry after a trailing separator")
 	require.Equal(t, `C:\A;C:\B`, platform.PathListWithout(`C:\A;c:\X\;C:\B;C:\x`, `C:\x`))
+}
+
+const servicesKey = `HKLM\SYSTEM\CurrentControlSet\Services\`
+
+// withService makes the fixture an install for everyone with one service,
+// under a system root inside the test's home. The service manager is the
+// stand-in that platform has for a registry root of the tests.
+func (f *fixture) withService(t *testing.T, restart string) {
+	t.Helper()
+	user := f.env
+	f.env = func(k string) string {
+		if k == "FYNSTALL_TEST_SYSTEM_ROOT" {
+			return filepath.Join(f.home, "machine")
+		}
+		return user(k)
+	}
+	require.NoError(t, os.Mkdir(filepath.Join(f.home, "machine"), 0o750))
+	f.m.Scopes = []string{"user", "system"}
+	f.m.Dirs["system"] = "{programs}/{id}"
+	f.m.KeepOnUninstall = nil
+	f.m.Actions = []manifest.Action{{Service: &manifest.Service{
+		Name: "hello", Exec: "bin/hello", Args: []string{"serve", "{data}/a b"}, Start: true, Restart: restart,
+	}}}
+}
+
+func (f *fixture) installSystem(t *testing.T) (*Receipt, error) {
+	t.Helper()
+	p, err := NewPlan(f.m, Options{Scope: "system", Env: f.env, Uninstaller: []byte("uninstaller")})
+	require.NoError(t, err)
+	return Apply(context.Background(), p, f.payload, []byte("uninstaller"), nil)
+}
+
+// A service action is a service of the Windows service manager: registered
+// when the install is for everyone, started, and stopped and removed by the
+// uninstaller before its files go (spec 002 D2a).
+func TestAServiceIsRegisteredWithWindowsAndRemovedAgain(t *testing.T) {
+	f := newFixture(t)
+	f.withService(t, "on-failure")
+	before := f.snap(t)
+
+	_, err := NewPlan(f.m, Options{Scope: "user", Env: f.env, Uninstaller: []byte("uninstaller")})
+	require.ErrorContains(t, err, "--scope system", "Windows has no services of one user")
+
+	var events []string
+	p, err := NewPlan(f.m, Options{Scope: "system", Env: f.env, Uninstaller: []byte("uninstaller")})
+	require.NoError(t, err)
+	r, err := Apply(context.Background(), p, f.payload, []byte("uninstaller"), nil)
+	require.NoError(t, err)
+
+	root := filepath.Join(f.home, "machine", "Program Files", "io.example.hello")
+	for name, want := range map[string]string{
+		// Each word quoted as Windows reads a command line; an argument is
+		// passed as the config wrote it.
+		"ImagePath":   `"` + filepath.Join(root, "bin", "hello") + `" serve "` + filepath.Join(f.home, "machine", "ProgramData") + `/a b"`,
+		"DisplayName": "hello", "Description": "Hello", "ObjectName": "LocalSystem", "Start": "2",
+		platform.StandInRestart: "on-failure", platform.StandInState: "running",
+	} {
+		got, ok := f.reg(t, servicesKey+"hello", name)
+		require.True(t, ok, name)
+		require.Equal(t, want, got, name)
+	}
+	at := slices.IndexFunc(r.Journal, func(e Entry) bool { return e.Op == OpService })
+	require.GreaterOrEqual(t, at, 0)
+	require.Equal(t, `HKCU\`+f.registry+`\`+servicesKey+"hello", r.Journal[at].Path, "the journal names the service by its key")
+
+	// A newer version plans for after this one's uninstaller has run, so the
+	// service it removes is not in the way (R17).
+	_, err = NewPlan(f.m, Options{Scope: "system", Env: f.env, Uninstaller: []byte("uninstaller"), Replacing: r})
+	require.NoError(t, err)
+
+	_, err = Uninstall(r, ReasonUninstall, func(e Event) { events = append(events, e.Text) })
+	require.NoError(t, err)
+	service, program := slices.Index(events, "removed service hello"), slices.Index(events, "removed "+filepath.Join(root, "bin", "hello"))
+	require.GreaterOrEqual(t, service, 0, events)
+	require.Less(t, service, program, "the service goes before its program")
+	require.Equal(t, before, f.snap(t), "files and registry")
+}
+
+// A service that is there already is someone else's. The service manager
+// does not give back all that a service was set up with, so the install
+// stops instead of replacing what it could not put back.
+func TestAServiceThatIsThereAlreadyStopsTheInstall(t *testing.T) {
+	f := newFixture(t)
+	f.withService(t, "no")
+	regtest.Set(t, f.registry, servicesKey+"hello", "ImagePath", `C:\elsewhere\hello.exe`, true)
+	before := f.snap(t)
+
+	_, err := NewPlan(f.m, Options{Scope: "system", Env: f.env, Uninstaller: []byte("uninstaller")})
+	require.ErrorContains(t, err, "already has a service of that name")
+	require.Equal(t, before, f.snap(t))
+}
+
+// An action after the service fails: the service is stopped and removed
+// with the rest.
+func TestAFailedInstallRemovesTheServiceItRegistered(t *testing.T) {
+	f := newFixture(t)
+	f.withService(t, "always")
+	f.add("bin/setup.exe", "not a program", 0o755)
+	f.m.Actions = append(f.m.Actions, manifest.Action{Run: &manifest.Run{Exec: "bin/setup.exe", NoUndo: true}})
+	before := f.snap(t)
+
+	_, err := f.installSystem(t)
+	require.ErrorContains(t, err, "setup.exe")
+	require.Equal(t, before, f.snap(t))
 }

@@ -941,6 +941,77 @@ Phase 7d, the version resource and the manifest:
       (`TestWindowsReadsTheVersionOfTheInstallerAndTheUninstaller`).
 - [x] Builds stay reproducible (`TestBuildsAreReproducible`).
 
+Chosen for 7d, services (2026-10-10), for the maintainer to confirm in the
+PR. The config format does not change. The receipt gains nothing: a
+service entry's `path` holds the service's registry key where on Linux it
+holds the unit file.
+
+- A service is registered through the service manager's API, runs as
+  LocalSystem as the reference's does, and starts with the computer.
+- Only system scope has services. Windows has none for one user, and the
+  nearest thing (a program started at logon from the `Run` key) is not
+  restarted and not stopped, so it would be a service in name only. A
+  per-user install of a config with a service stops at the plan and names
+  `--scope system`; a config with a service and no system scope does not
+  build for Windows. Open, for the maintainer: `examples/beacon` therefore
+  installs per-user on Linux and not on Windows, from one config.
+- `restart: on-failure` is three restarts, five seconds apart, counted
+  over a day, after a crash or a stop with an exit code other than 0.
+  `always` is the same, and the plan says that Windows does not restart a
+  service that stopped by itself.
+- A service of the same name that is there already stops the install. On
+  Linux the unit file is saved and put back. The service manager does not
+  give back everything a service has (the password of its account), so
+  what the uninstaller put back would not be what was there. This is a
+  difference between the platforms that the one-config rule allows only
+  because the alternative breaks R9d.
+- The uninstaller's failure to remove a service is an error, where on
+  Linux what `systemctl` says is a warning. A service that stays registered
+  would start a program that is gone.
+- The program must answer the service manager. A wrapper that runs any
+  program as a service is not part of this; `docs/config.md` says so.
+- `stop_processes` (spec 002 D2a) is not built. The uninstaller waits for
+  the service's own process; a program's other processes are not stopped.
+- The tests do not register services. A system install in the tests has
+  its registry keys under the test's root, and for a service's key under
+  such a root the backend writes the values Windows keeps for a service
+  and starts nothing. This is a stand-in inside the shipped program, as
+  the two test roots are. One test of the real service manager runs only
+  with `FYNSTALL_TEST_REAL_SERVICES=1` and as an administrator.
+
+Phase 7d, services:
+
+- [x] A service action is in the plan, is registered and started by a
+      system install, and is stopped and removed by the uninstaller before
+      the program's files; files and registry match their state before
+      (`TestAServiceIsRegisteredWithWindowsAndRemovedAgain`, and through
+      the helper with the real `beacon.exe`,
+      `TestAServiceIsRegisteredForEveryoneAndRemovedBeforeItsProgram`).
+- [x] A per-user install of a config with a service changes nothing and
+      names `--scope system` (the same two tests).
+- [x] A service that is there already stops the install
+      (`TestAServiceThatIsThereAlreadyStopsTheInstall`), and an upgrade's
+      plan does not count the one its old version removes.
+- [x] A failed install removes the service it registered
+      (`TestAFailedInstallRemovesTheServiceItRegistered`).
+- [x] The real service manager registers `beacon.exe` as LocalSystem with
+      recovery actions, starts it, stops it, and removes it, after which the
+      program's file can be deleted
+      (`TestTheRealServiceManagerRunsAServiceAndRemovesIt`, run by hand: see
+      Verification).
+- [ ] Desk check on Windows 11, from a console that is not elevated:
+      `make beacon`, `fynstall build --cli-only` in `examples/beacon`, and
+      the installer with `--scope system`. One UAC prompt; `sc query beacon`
+      says RUNNING and Services shows "Beacon, the fynstall example
+      service" with its recovery actions; the uninstaller shows one prompt,
+      and afterwards `sc query beacon` finds no service and the install
+      directory is gone.
+- [x] A repair of an install with a service removes the old service
+      through the installed uninstaller before it registers the new one
+      (`TestAServiceIsRegisteredForEveryoneAndRemovedBeforeItsProgram`,
+      against the stand-in; with the real service manager it is part of
+      the desk check: run the installer a second time).
+
 The whole of phase 7:
 
 - [ ] `fynstall build --target windows/amd64` from Linux produces an `.exe`
