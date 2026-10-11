@@ -43,3 +43,37 @@ func quoteUnitWord(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "$", "$$", "\n", `\n`)
 	return `"` + r.Replace(s) + `"`
 }
+
+// The kinds of service manager a backend has (spec 002 D2a).
+const (
+	// Systemd is unit files and systemctl.
+	Systemd = "systemd"
+	// SCM is the Windows service manager, which has no files: a service is
+	// an entry it keeps, named in the journal by its registry key.
+	SCM = "scm"
+	// NoServices is an OS without a backend.
+	NoServices = ""
+)
+
+// ServiceDef is a service as the Windows service manager is given it.
+type ServiceDef struct {
+	Name string
+	// DisplayName is what the Services window lists, and Description what
+	// it says beside it.
+	DisplayName string
+	Description string
+	// Exec is the absolute program and Args its arguments.
+	Exec string
+	Args []string
+	// Restart is no, on-failure or always.
+	Restart string
+}
+
+// servicesKey is where Windows keeps its services, one key each.
+const servicesKey = `HKLM\SYSTEM\CurrentControlSet\Services`
+
+// ServiceKey is the registry key of the Windows service name: its own, or,
+// in the tests, the key moved under their registry root (see RegKey).
+func ServiceKey(v map[string]string, name string) string {
+	return RegKey(v, servicesKey+`\`+name)
+}

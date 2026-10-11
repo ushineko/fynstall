@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -176,6 +177,9 @@ func stageAction(a config.Action, m *manifest.Manifest, payload map[string]strin
 		e, err := exec("service "+s.Name, s.Exec)
 		if err != nil {
 			return err
+		}
+		if strings.HasPrefix(m.Target, "windows/") && !slices.Contains(m.Scopes, "system") {
+			return fmt.Errorf("service %s: a Windows service runs for the whole computer, so a config with a service must offer system scope (install.scopes) to build for %s", s.Name, m.Target)
 		}
 		m.Actions = append(m.Actions, manifest.Action{Service: &manifest.Service{
 			Name: s.Name, Description: s.Description, Exec: e, Args: s.Args, Start: s.Starts(), Restart: s.RestartPolicy(),

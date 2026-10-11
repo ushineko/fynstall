@@ -48,6 +48,7 @@ var (
 	twoScopes builder.Artifact // a config that offers user and system scope
 	shell     builder.Artifact // a launcher entry, an icon, a link and a publisher
 	shellFull builder.Artifact // the same, with the wizard
+	beacon    builder.Artifact // examples/beacon: a service and the other actions
 	setupFail error
 )
 
@@ -167,6 +168,20 @@ func setup(work string) error {
 		return err
 	}
 	if shell, err = one(filepath.Join(dir, "fynstall.yaml"), v1, "shell-dist"); err != nil {
+		return err
+	}
+	// examples/beacon as it is, with its service.
+	actions := filepath.Join(work, "beacon")
+	if err := copyFile(filepath.Join(repo, "examples", "beacon", "fynstall.yaml"), filepath.Join(actions, "fynstall.yaml")); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-trimpath", "-o", filepath.Join(actions, "bin", "beacon.exe"), "./examples/beacon")
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("build beacon: %w\n%s", err, out)
+	}
+	if beacon, err = one(filepath.Join(actions, "fynstall.yaml"), v1, "beacon-dist"); err != nil {
 		return err
 	}
 	// The same with the wizard, which needs cgo and so a C compiler.
@@ -715,4 +730,51 @@ func TestWindowsReadsTheVersionOfTheInstallerAndTheUninstaller(t *testing.T) {
 		require.Equal(t, "1.2.3.0|1.2.3|1.2.3|Shell Example|Example Makers|Shell Example "+kind+"|"+filepath.Base(p)+"|False",
 			strings.TrimSpace(string(got)), p)
 	}
+}
+
+// A service action on Windows is a service of the service manager (spec 002
+// D2a), which only an install for everyone has. The helper registers and
+// starts it, and the uninstaller's helper stops and removes it before its
+// program. The service manager here is the stand-in under the test's
+// registry root (platform, scm_windows.go); the run action and the
+// uninstall hook run the real beacon.exe.
+func TestAServiceIsRegisteredForEveryoneAndRemovedBeforeItsProgram(t *testing.T) {
+	h := newHome(t, "io.ushineko.beacon")
+	before := h.snap(t)
+
+	code, out := h.run(t, beacon.Installer, "--yes")
+	require.Equal(t, 1, code, out)
+	require.Contains(t, out, "service beacon: a Windows service runs for the whole computer")
+	require.Contains(t, out, "--scope system")
+	require.Equal(t, before, h.snap(t), "nothing was changed")
+
+	code, out = h.run(t, beacon.Installer, "--yes", "--scope", "system")
+	require.Equal(t, 0, code, out)
+	root := filepath.Join(h.sys, "Program Files", "io.ushineko.beacon")
+	program := filepath.Join(root, "bin", "beacon.exe")
+	require.Contains(t, out, "service  beacon (a Windows service that runs "+program+" serve), started")
+	require.Contains(t, out, "==> Configuring")
+	const key = `HKLM\SYSTEM\CurrentControlSet\Services\beacon`
+	require.Equal(t, `"`+program+`" serve`, h.value(t, key, "ImagePath"))
+	require.Equal(t, "Beacon, the fynstall example service", h.value(t, key, "DisplayName"))
+	require.Equal(t, "on-failure", h.value(t, key, "FynstallTestRestart"))
+	require.Equal(t, "running", h.value(t, key, "FynstallTestState"))
+	require.FileExists(t, filepath.Join(h.sys, "ProgramData", "beacon", "setup-done"), "the run action ran, as the helper")
+
+	// A repair removes the install through its own uninstaller, which takes
+	// the service with it, so the new one is not refused as someone else's
+	// and no file is replaced under a running service (R17).
+	code, out = h.run(t, beacon.Installer, "--yes", "--verbose")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "Repairs Beacon 0.1.0")
+	require.Less(t, strings.Index(out, "removed service beacon"), strings.Index(out, "service beacon\n"), "the old service goes, then the new one is registered")
+	require.Equal(t, "running", h.value(t, key, "FynstallTestState"))
+
+	code, out = h.run(t, filepath.Join(root, "uninstall.exe"), "--verbose")
+	require.Equal(t, 0, code, out)
+	hook, service, removed := strings.Index(out, "the uninstall hook ran"), strings.Index(out, "removed service beacon"), strings.Index(out, "removed "+program)
+	require.Positive(t, hook, out)
+	require.Less(t, hook, service, "the hook runs before anything is removed")
+	require.Less(t, service, removed, "the service goes before its program")
+	require.Equal(t, before, h.snap(t), "the machine's folders and registry are as they were")
 }

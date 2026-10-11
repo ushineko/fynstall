@@ -37,6 +37,12 @@ type PlannedService struct {
 	// Exists is true when a unit file is already at Unit. Apply saves it,
 	// and the uninstaller puts it back with its enabled and running state.
 	Exists bool
+	// Key and Def are set on Windows, where a service is an entry of the
+	// service manager and there is no unit file: Key is the service's
+	// registry key, which names it in the journal, and Def what Apply
+	// registers.
+	Key string
+	Def platform.ServiceDef
 }
 
 // PlannedRun is a run action, or an uninstall hook: Exec is absolute and
@@ -141,6 +147,9 @@ func (p *Plan) addActions(vars, params map[string]string) error {
 }
 
 func (p *Plan) addService(s *manifest.Service, vars map[string]string, expandAll func([]string) ([]string, error)) error {
+	if platform.Services == platform.SCM {
+		return p.addWindowsService(s, vars, expandAll)
+	}
 	if !platform.HasServiceManager() {
 		return fmt.Errorf("service %s: systemctl is not on PATH, and this install runs a service", s.Name)
 	}
@@ -163,6 +172,43 @@ func (p *Plan) addService(s *manifest.Service, vars map[string]string, expandAll
 		return err
 	}
 	p.Actions = append(p.Actions, PlannedAction{Service: ps})
+	return nil
+}
+
+// addWindowsService plans a service of the Windows service manager. It is
+// for the whole computer, so it needs a system install. A service of the
+// same name that this app's own earlier install did not make is refused:
+// the service manager does not give back everything a service was set up
+// with (the password of its account, for one), so the uninstaller could not
+// put it back as it was.
+func (p *Plan) addWindowsService(s *manifest.Service, vars map[string]string, expandAll func([]string) ([]string, error)) error {
+	if !platform.System(vars) {
+		return fmt.Errorf("service %s: a Windows service runs for the whole computer, so this program is installed for everyone (--scope system)", s.Name)
+	}
+	args, err := expandAll(s.Args)
+	if err != nil {
+		return fmt.Errorf("service %s: %w", s.Name, err)
+	}
+	def := platform.ServiceDef{
+		Name: s.Name, DisplayName: s.Description, Description: s.Description,
+		Exec: p.inRoot(s.Exec), Args: args, Restart: s.Restart,
+	}
+	if def.DisplayName == "" {
+		// Windows wants each service's display name to be its own, so the
+		// app's name, which two services of one app share, does not serve.
+		def.DisplayName, def.Description = s.Name, p.Manifest.App.Name
+	}
+	key := platform.ServiceKey(vars, s.Name)
+	if !p.gone[key] {
+		exists, err := platform.SCMExists(key)
+		if err != nil {
+			return fmt.Errorf("service %s: %w", s.Name, err)
+		}
+		if exists {
+			return fmt.Errorf("service %s: Windows already has a service of that name, which this program's installer did not make and so does not replace; remove that service first", s.Name)
+		}
+	}
+	p.Actions = append(p.Actions, PlannedAction{Service: &PlannedService{Name: s.Name, Start: s.Start, System: true, Key: key, Def: def}})
 	return nil
 }
 
@@ -219,7 +265,26 @@ func (j *journal) apply(ctx context.Context, a PlannedAction) error {
 	return nil
 }
 
+// windowsService registers a service with the Windows service manager. It
+// is journalled once it is registered and before it is started: an entry
+// for a service that was never made would have the undo remove one of the
+// same name that someone else made in between.
+func (j *journal) windowsService(s *PlannedService) error {
+	if err := platform.SCMCreate(s.Key, s.Def); err != nil {
+		return err //nolint:wrapcheck // names the service
+	}
+	j.add(Entry{Op: OpService, Path: s.Key, Service: &ServiceEntry{Name: s.Name, System: true}})
+	j.report.emit(Detail, "service %s", s.Name)
+	if s.Start {
+		return platform.SCMStart(s.Key) //nolint:wrapcheck // as above
+	}
+	return nil
+}
+
 func (j *journal) service(s *PlannedService) error {
+	if s.Key != "" {
+		return j.windowsService(s)
+	}
 	e := Entry{Op: OpService, Path: s.Unit, Service: &ServiceEntry{Name: s.Name, System: s.System}}
 	if s.Exists {
 		e.Service.WasEnabled, e.Service.WasActive = platform.ServiceState(s.System, s.Name)
@@ -252,6 +317,16 @@ func (j *journal) undoAction(e Entry) error {
 	switch e.Op {
 	case OpService:
 		s := e.Service
+		if platform.Services == platform.SCM {
+			// Stopped, and its process gone, before its files are removed.
+			// Unlike the warnings below this is an error: a service that
+			// stays registered would start a program that is no longer there.
+			if err := platform.SCMRemove(e.Path); err != nil {
+				return err //nolint:wrapcheck // names the service
+			}
+			j.report.emit(Detail, "removed service %s", s.Name)
+			return nil
+		}
 		if err := platform.DisableService(s.System, s.Name); err != nil {
 			j.report.emit(Warn, "%v", err)
 		}

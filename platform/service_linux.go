@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// Services is systemd's: a service is a unit file (spec 002 D2a).
+const Services = Systemd
+
 // UnitPath is where the unit file of the service name goes. Per-user
 // scope uses the systemd user manager, so nothing needs root (spec 002
 // phase 4a); system scope uses the system manager.

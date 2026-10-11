@@ -7,12 +7,15 @@ app:
   publisher: ushineko
 
 install:
-  # Per user, a systemd user unit; for everyone, a system unit.
+  # On Linux: per user, a systemd user unit; for everyone, a system unit.
+  # On Windows a service is for the whole computer, so only the install for
+  # everyone (--scope system) has one.
   scopes: [user, system]
 
 payload:
-  - src: bin/beacon
-    dst: bin/beacon
+  # {exe} is ".exe" for a Windows target and nothing elsewhere.
+  - src: bin/beacon{exe}
+    dst: bin/beacon{exe}
 
 integration:
   # Where an older version's data is moved to; the uninstaller leaves it.
@@ -24,19 +27,20 @@ actions:
   - migrate:
       from: "{data}/beacon-0"
       to: "{data}/{id}/data"
-  # A systemd user unit; the uninstaller stops and removes it.
+  # A systemd unit, or a Windows service; the uninstaller stops and removes
+  # it.
   - service:
       name: beacon
       description: Beacon, the fynstall example service
-      exec: bin/beacon
+      exec: bin/beacon{exe}
       args: [serve]
   # A payload program run at install, and its undo at uninstall.
   - run:
-      exec: bin/beacon
+      exec: bin/beacon{exe}
       args: [setup, "{config}/beacon/setup-done"]
       undo: [teardown, "{config}/beacon/setup-done"]
   # Runs before the uninstaller removes anything.
   - run:
       on: uninstall
-      exec: bin/beacon
+      exec: bin/beacon{exe}
       args: [goodbye]

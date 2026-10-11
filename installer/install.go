@@ -346,8 +346,15 @@ func actionLines(p *engine.Plan) []string {
 		case a.Service != nil:
 			s := a.Service
 			line := fmt.Sprintf("service  %s (%s)", s.Name, s.Unit)
+			if s.Key != "" {
+				line = fmt.Sprintf("service  %s (a Windows service that runs %s)", s.Name, commandLine(s.Def.Exec, s.Def.Args))
+			}
 			if s.Start {
 				line += ", started"
+			}
+			if s.Key != "" && s.Def.Restart == "always" {
+				// A part of the config that Windows cannot do says so.
+				line += "; Windows starts it again after a failure, not after it stops by itself"
 			}
 			if s.Exists {
 				line += "; replaces a service of that name, which the uninstaller puts back"

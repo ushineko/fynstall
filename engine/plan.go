@@ -224,7 +224,7 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	}
 	for _, a := range p.Actions {
 		switch {
-		case a.Service != nil:
+		case a.Service != nil && a.Service.Unit != "":
 			dirs = append(dirs, filepath.Dir(a.Service.Unit))
 		case a.Migrate != nil && a.Migrate.Present:
 			dirs = append(dirs, filepath.Dir(a.Migrate.To))

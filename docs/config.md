@@ -240,15 +240,15 @@ actions:
         token: "{param:token}"
   - service:
       name: beacon
-      exec: bin/beacon
+      exec: bin/beacon{exe}
       args: [serve]
   - run:
-      exec: bin/beacon
+      exec: bin/beacon{exe}
       args: [setup, "{config}/beacon/setup-done"]
       undo: [teardown, "{config}/beacon/setup-done"]
   - run:
       on: uninstall
-      exec: bin/beacon
+      exec: bin/beacon{exe}
       args: [goodbye]
   - migrate:
       from: "{data}/beacon-0"
@@ -286,6 +286,30 @@ login. The uninstaller stops, disables and removes it. If a unit of that
 name was there before, the install saves it, and the uninstaller puts it
 back, enabled and running again if it was. The install needs `systemctl`
 on `PATH`. A system install's service comes with system scope.
+
+On Windows, the service is a service of the Windows service manager. It
+runs as LocalSystem and starts with the computer.
+
+- Windows has no services of one user. An install with a service must be
+  for everyone (`--scope system`), and a per-user install of such a config
+  stops with that message before it changes anything. A config with a
+  service that does not offer system scope does not build for Windows.
+- The program must answer the service manager: say that it runs, and stop
+  when asked. Windows stops a program that does not after 30 seconds. In
+  Go, `golang.org/x/sys/windows/svc` does this; `examples/beacon` shows it.
+- `restart: on-failure` makes Windows start the service again after a
+  crash, or after it stops with an exit code other than 0: three times,
+  five seconds apart, counted over a day. `restart: always` does the same.
+  Windows does not start a service again that stopped by itself with exit
+  code 0, and the installer says so in its plan.
+- `description`, when set, is also the name that the Services window
+  lists. Without it, that name is `name`.
+- The uninstaller stops the service, waits for its process to end, and
+  removes it, before it removes the program.
+- A service of the same name that is there already stops the install. The
+  service manager does not give back everything a service was set up with,
+  so the uninstaller could not put it back. An upgrade is not affected: the
+  old version's uninstaller removes its service first.
 
 **run** runs a payload program, never a shell, in the install directory.
 It is the last resort for a change no other action makes: the installer

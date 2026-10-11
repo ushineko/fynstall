@@ -191,6 +191,23 @@ Windows expects for each.
 The plan lists the shortcut, the registry key and the `PATH` entry before
 the install starts, and `--dry-run` prints them.
 
+### Services
+
+A `service` action registers a service with the Windows service manager,
+through its API and not through `sc.exe`. The service runs as LocalSystem,
+starts with the computer, and has the recovery actions that `restart` asks
+for. Only an install for everyone has one, and the helper registers it, as
+it makes every other change of a system install.
+
+The receipt names the service by its registry key,
+`HKLM\SYSTEM\CurrentControlSet\Services\<name>`. The uninstaller stops the
+service, waits for its process to end, and removes it, before it removes
+the program's files. An upgrade does the same through the old version's
+uninstaller, so no file is replaced under a running service.
+
+`docs/config.md` says what the program must do to run as a service, and
+what an install does when a service of the same name is there already.
+
 ### What the uninstaller puts back
 
 The receipt records each registry key that the install made and the earlier
