@@ -92,9 +92,6 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 		if !slices.Contains(config.KnownTargets, t) {
 			return nil, fmt.Errorf("unknown target %q", t)
 		}
-		if strings.HasPrefix(t, "windows/") && !o.CLIOnly {
-			return nil, fmt.Errorf("target %s: the wizard on Windows arrives later in spec 001 phase 7; build it with --cli-only", t)
-		}
 	}
 	var variants []bool
 	if !o.CLIOnly {

@@ -65,10 +65,7 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 	// The CLI never asks: running the uninstaller is the decision (spec 001
 	// phase 4). --yes is accepted for scripts and the installer's
 	// --uninstall; in the window it skips the question.
-	md, err := chooseMode(modeInput{
-		wantGUI: gui, wantCLI: cli, available: guiAvailable, cliOnly: quiet || *upgrade,
-		interactive: e.Interactive, display: hasDisplay(e.Getenv), root: os.Geteuid() == 0,
-	})
+	md, err := e.modeFor(modeInput{wantGUI: gui, wantCLI: cli, cliOnly: quiet || *upgrade})
 	if err != nil {
 		_, _ = fmt.Fprintln(e.Err, err)
 		return exitUsage
@@ -256,6 +253,7 @@ func handOver(app manifest.App, self string, args []string, e Env, problem func(
 	}
 	cmd := exec.CommandContext(context.Background(), ix.Uninstaller, args...) // #nosec G204 G702 -- the path this app's own install recorded
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = e.In, e.Out, e.Err
+	platform.Background(cmd)
 	err = cmd.Run()
 	var exit *exec.ExitError
 	switch {

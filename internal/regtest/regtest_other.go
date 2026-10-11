@@ -14,3 +14,6 @@ func Root(*testing.T) string { return "" }
 
 // Snapshot is empty: there is no registry.
 func Snapshot(*testing.T, string) map[string]string { return map[string]string{} }
+
+// Get finds nothing: there is no registry.
+func Get(*testing.T, string, string, string) (string, bool) { return "", false }

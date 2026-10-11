@@ -80,7 +80,14 @@ func RequireIcon(t *testing.T, ico []byte, got map[[2]uint16][]byte) {
 	t.Helper()
 	le := binary.LittleEndian
 	count := int(le.Uint16(ico[4:]))
-	require.Len(t, got, count+1, "each image and the group")
+	// A C linker may add resources of its own, such as a manifest; the icon
+	// is the images and one group.
+	per := map[uint16]int{}
+	for k := range got {
+		per[k[0]]++
+	}
+	require.Equal(t, count, per[resIcon], "each image")
+	require.Equal(t, 1, per[resGroupIcon], "one group")
 	group := got[[2]uint16{resGroupIcon, 1}]
 	require.Len(t, group, 6+14*count)
 	require.Equal(t, ico[:6], group[:6])

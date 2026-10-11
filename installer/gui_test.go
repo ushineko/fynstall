@@ -1,7 +1,6 @@
-// The wizard on Windows, and these tests with it, come later in spec 001
-// phase 7.
+// The wizard, driven headless against the real engine.
 
-//go:build !nogui && linux
+//go:build !nogui
 
 package installer
 
@@ -9,9 +8,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -24,8 +25,10 @@ import (
 	"github.com/ushineko/fynedesygn/wizard"
 
 	"github.com/ushineko/fynstall/engine"
+	"github.com/ushineko/fynstall/internal/regtest"
 	"github.com/ushineko/fynstall/internal/snapshot"
 	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/platform"
 )
 
 // fakeToken stands in for a secret parameter's value in these tests.
@@ -39,9 +42,9 @@ func guiFixture(t *testing.T) (*manifest.Manifest, Payload, Env, string) {
 	content := "#!/bin/sh\necho hello\n"
 	sum := sha256.Sum256([]byte(content))
 	m := &manifest.Manifest{
-		Schema: manifest.Schema, Target: "linux/amd64", GUI: true,
+		Schema: manifest.Schema, Target: runtime.GOOS + "/" + runtime.GOARCH, GUI: true,
 		App:    manifest.App{ID: "io.example.hello", Name: "Hello", Version: "0.1.0"},
-		Scopes: []string{"user"}, Dirs: map[string]string{"user": "{data}/{id}"},
+		Scopes: []string{"user"}, Dirs: map[string]string{"user": "{programs}/{id}"},
 		Files:   []manifest.File{{Path: "bin/hello", Size: int64(len(content)), SHA256: hex.EncodeToString(sum[:]), Mode: 0o755}},
 		Links:   []manifest.Link{{Name: "hello", Target: "bin/hello"}},
 		Desktop: []manifest.Desktop{{ID: "io.example.hello", Name: "Hello", Exec: "bin/hello"}},
@@ -56,12 +59,42 @@ func guiFixture(t *testing.T) (*manifest.Manifest, Payload, Env, string) {
 	}
 	p := Payload{Files: fstest.MapFS{"bin/hello": {Data: []byte(content)}}, Uninstaller: []byte("uninstaller")}
 	run := t.TempDir()
-	e := Env{Getenv: func(k string) string { return map[string]string{"HOME": home, "XDG_RUNTIME_DIR": run}[k] }, ExeDir: t.TempDir()}
+	vars := map[string]string{"HOME": home, "USERPROFILE": home, "XDG_RUNTIME_DIR": run, regtest.Env: regtest.Root(t)}
+	e := Env{Getenv: func(k string) string { return vars[k] }, ExeDir: t.TempDir()}
+	if runtime.GOOS == "windows" {
+		// Before any install: a fixture whose registry writes would reach
+		// the real registry stops here.
+		v, err := platform.Vars("user", e.Getenv)
+		require.NoError(t, err)
+		require.True(t, vars[regtest.Env] != "" && strings.HasPrefix(platform.RegKey(v, `HKCU\x`), `HKCU\`+vars[regtest.Env]+`\`),
+			"the test's registry root is not in use; refusing to run an install against the real registry")
+	}
 	return m, p, e, home
 }
 
+// at is a path under the placeholder key ("data", "config", "programs"),
+// wherever this OS puts it in the fixture's home.
+func at(t *testing.T, e Env, key string, elem ...string) string {
+	t.Helper()
+	v, err := platform.Vars("user", e.Getenv)
+	require.NoError(t, err)
+	return filepath.Join(append([]string{v[key]}, elem...)...)
+}
+
+// snap is the fixture's home and, on Windows, its registry: both are part
+// of "as it was" (R9d).
+func snap(t *testing.T, e Env, home string) map[string]string {
+	t.Helper()
+	s, err := snapshot.Take(home)
+	require.NoError(t, err)
+	for k, v := range regtest.Snapshot(t, e.Getenv(regtest.Env)) {
+		s["registry:"+k] = v
+	}
+	return s
+}
+
 func TestTheWizardInstallsWithItsParameters(t *testing.T) {
-	m, p, e, home := guiFixture(t)
+	m, p, e, _ := guiFixture(t)
 	g, err := newInstallWizard(m, p, installFlags{scope: "user"}, e)
 	require.NoError(t, err)
 	w := wizard.Headless(fynetest.App(t), g.options)
@@ -104,16 +137,27 @@ func TestTheWizardInstallsWithItsParameters(t *testing.T) {
 	require.NotNil(t, fynetest.FindLabel(w.Content(), countsText(engine.Counts{Files: n, FilesTotal: n, Bytes: size, BytesTotal: size})),
 		"the status line ends at the plan's totals")
 
-	root := filepath.Join(home, ".local", "share", "io.example.hello")
+	root := at(t, e, "programs", "io.example.hello")
 	b, err := os.ReadFile(filepath.Join(root, "bin", "hello"))
 	require.NoError(t, err)
 	require.Equal(t, "#!/bin/sh\necho hello\n", string(b))
-	cfg, err := os.ReadFile(filepath.Join(home, ".config", "hello", "config.yml"))
+	cfg, err := os.ReadFile(at(t, e, "config", "hello", "config.yml"))
 	require.NoError(t, err)
 	require.Equal(t, "server: https://example.invalid\ntoken: "+fakeToken+"\n", string(cfg))
-	entry, err := os.ReadFile(filepath.Join(home, ".local", "share", "applications", "io.example.hello.desktop"))
-	require.NoError(t, err)
-	require.Contains(t, string(entry), "Exec="+filepath.Join(root, "uninstall")+" --gui\n", "a full build's entry has the Uninstall action")
+	if platform.Integration == platform.WindowsShell {
+		// Settings > Apps opens the uninstaller's window (L8).
+		got, ok := regtest.Get(t, e.Getenv(regtest.Env), platform.UninstallKey+`\io.example.hello`, "UninstallString")
+		require.True(t, ok)
+		require.Equal(t, `"`+filepath.Join(root, engine.UninstallName)+`" --gui`, got)
+		v, err := platform.Vars("user", e.Getenv)
+		require.NoError(t, err)
+		_, err = os.Stat(filepath.Join(platform.StartMenu(v), "Hello.lnk"))
+		require.NoError(t, err, "the launcher entry is a Start Menu shortcut")
+	} else {
+		entry, err := os.ReadFile(at(t, e, "data", "applications", "io.example.hello.desktop"))
+		require.NoError(t, err)
+		require.Contains(t, string(entry), "Exec="+filepath.Join(root, "uninstall")+" --gui\n", "a full build's entry has the Uninstall action")
+	}
 
 	w.Next()
 	require.Equal(t, "Done", w.Current().Title())
@@ -127,8 +171,7 @@ func TestTheWizardHoldsInstallWhenThePlanCannotBeMade(t *testing.T) {
 	m.Parameters, m.ConfigFiles, m.Licence = nil, nil, ""
 	// A directory where the payload needs a file.
 	require.NoError(t, os.MkdirAll(filepath.Join(home, "elsewhere", "bin", "hello"), 0o750))
-	before, err := snapshot.Take(home)
-	require.NoError(t, err)
+	before := snap(t, e, home)
 
 	g, err := newInstallWizard(m, p, installFlags{scope: "user"}, e)
 	require.NoError(t, err)
@@ -143,14 +186,12 @@ func TestTheWizardHoldsInstallWhenThePlanCannotBeMade(t *testing.T) {
 	w.Back()
 	w.Cancel()
 	require.Equal(t, wizard.Cancelled, w.Result().Outcome)
-	after, err := snapshot.Take(home)
-	require.NoError(t, err)
-	require.Equal(t, before, after)
+	require.Equal(t, before, snap(t, e, home))
 }
 
 func TestAnInstalledProgramGetsItsOwnUninstallerOffered(t *testing.T) {
-	m, p, e, home := guiFixture(t)
-	idx := filepath.Join(home, ".local", "share", "fynstall", "installs")
+	m, p, e, _ := guiFixture(t)
+	idx := at(t, e, "data", "fynstall", "installs")
 	require.NoError(t, os.MkdirAll(idx, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(idx, "io.example.hello.json"),
 		[]byte(`{"root":"/x","uninstaller":"/x/uninstall","version":"0.0.9","scope":"user"}`), 0o600))
@@ -166,8 +207,7 @@ func TestTheUninstallerAsksOnceThenRemoves(t *testing.T) {
 		t.Run(fmt.Sprintf("skip=%v", skip), func(t *testing.T) {
 			m, p, e, home := guiFixture(t)
 			m.Parameters, m.ConfigFiles = nil, nil
-			before, err := snapshot.Take(home)
-			require.NoError(t, err)
+			before := snap(t, e, home)
 			plan, err := engine.NewPlan(m, engine.Options{Env: e.Getenv, Uninstaller: p.Uninstaller})
 			require.NoError(t, err)
 			r, err := engine.Apply(context.Background(), plan, p.Files, p.Uninstaller, nil)
@@ -183,9 +223,7 @@ func TestTheUninstallerAsksOnceThenRemoves(t *testing.T) {
 				c.Act()
 			}
 			require.Equal(t, "Hello 0.1.0 was removed.", c.Message())
-			after, err := snapshot.Take(home)
-			require.NoError(t, err)
-			require.Equal(t, before, after)
+			require.Equal(t, before, snap(t, e, home))
 		})
 	}
 }
@@ -197,8 +235,7 @@ func TestTheUninstallWindowOffersToRemoveTheLeftovers(t *testing.T) {
 		t.Run(fmt.Sprintf("remove=%v", remove), func(t *testing.T) {
 			m, p, e, home := guiFixture(t)
 			m.Parameters, m.ConfigFiles = nil, nil
-			before, err := snapshot.Take(home)
-			require.NoError(t, err)
+			before := snap(t, e, home)
 			plan, err := engine.NewPlan(m, engine.Options{Env: e.Getenv, Uninstaller: p.Uninstaller})
 			require.NoError(t, err)
 			r, err := engine.Apply(context.Background(), plan, p.Files, p.Uninstaller, nil)
@@ -221,9 +258,7 @@ func TestTheUninstallWindowOffersToRemoveTheLeftovers(t *testing.T) {
 			}
 			c.Act()
 			require.Equal(t, "Hello 0.1.0 was removed, with the files it made.", c.Message())
-			after, err := snapshot.Take(home)
-			require.NoError(t, err)
-			require.Equal(t, before, after)
+			require.Equal(t, before, snap(t, e, home))
 		})
 	}
 }
@@ -248,6 +283,16 @@ func TestTheWizardAsksWhoTheInstallIsFor(t *testing.T) {
 	m.Dirs["system"] = "/opt/{id}"
 	g, err := newInstallWizard(m, p, installFlags{scope: "user"}, e)
 	require.NoError(t, err)
+	if _, err := platform.Vars("system", e.Getenv); errors.Is(err, platform.ErrScopeUnavailable) {
+		// Until this platform has system scope, the wizard offers the one
+		// it has and does not ask.
+		for _, pg := range g.options.Pages {
+			require.NotEqual(t, "Install for", pg.Title())
+		}
+		require.Contains(t, g.dirs, "user")
+		require.NotContains(t, g.dirs, "system")
+		return
+	}
 	w := wizard.Headless(fynetest.App(t), g.options)
 	w.Next() // Welcome
 	require.Equal(t, "Install for", w.Current().Title())
@@ -275,6 +320,9 @@ func TestTheWizardAsksWhoTheInstallIsFor(t *testing.T) {
 // when the first job returned, and then reporting a removal that never
 // happened.
 func TestTheUninstallWindowKeepsItsHelperForTheAnswer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the helper on Windows comes with UAC (spec 001 phase 7c); this one is a shell script")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("as root there is no helper")
 	}

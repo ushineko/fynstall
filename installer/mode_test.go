@@ -24,6 +24,9 @@ func TestChooseMode(t *testing.T) {
 		{"--gui with no display", with(func(i *modeInput) { i.wantGUI = true }), modeCLI, "needs a display"},
 		{"--gui in a CLI-only build", modeInput{wantGUI: true, display: true}, modeCLI, "built without the wizard"},
 		{"a CLI-only build on a desktop", modeInput{display: true}, modeCLI, ""},
+		{"--gui as an administrator", with(func(i *modeInput) { i.display, i.wantGUI, i.root = true, true, true }), modeCLI, "the window does not run as"},
+		{"double-clicked as an administrator", with(func(i *modeInput) { i.display, i.root = true, true }), modeCLI, ""},
+		{"--gui as an administrator in a CLI-only build", modeInput{wantGUI: true, display: true, root: true}, modeCLI, "built without the wizard"},
 		{"--gui and --cli", with(func(i *modeInput) { i.wantGUI, i.wantCLI = true, true }), modeCLI, "give one"},
 	}
 	for _, tc := range cases {
@@ -37,10 +40,4 @@ func TestChooseMode(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
-}
-
-func TestHasDisplay(t *testing.T) {
-	require.True(t, hasDisplay(func(k string) string { return map[string]string{"WAYLAND_DISPLAY": "wayland-0"}[k] }))
-	require.True(t, hasDisplay(func(k string) string { return map[string]string{"DISPLAY": ":0"}[k] }))
-	require.False(t, hasDisplay(func(string) string { return "" }))
 }
