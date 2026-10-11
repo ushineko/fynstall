@@ -16,8 +16,8 @@ Linux installers, per-user, with a wizard and a command line, launcher
 entries, icons, links on `PATH`, parameters and configuration files, and
 system-wide installs and upgrades. On Windows: per-user and system-wide
 installs from the wizard and the command line, with a Start Menu shortcut,
-an entry in Settings > Apps and an entry on `PATH`. Services on Windows
-follow.
+an entry in Settings > Apps and an entry on `PATH`, and services for a
+system-wide install.
 
 ## Using it
 
@@ -56,7 +56,11 @@ it does not ask: running it is the decision. A newer installer's
 `--uninstall`, and the uninstaller beside the installer in `dist/`, hand
 over to that same installed file.
 
-Until fynstall has a release, build against a checkout:
+An installer is pinned to the version of the fynstall that built it. A
+released builder is one built with `make build` in a checkout that sits on
+a release's tag, such as `v0.1.0`, with nothing modified; it needs no more
+than the config. A builder made any other way, `go install` included, does
+not know which release it is: build against a checkout with it,
 `fynstall build --runtime-path <path to fynstall>`.
 
 The config format is in [docs/config.md](docs/config.md), and what an install
@@ -108,7 +112,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
-### Unreleased
+### 0.1.0 (2026-10-10)
 
 - Fixes from the Windows desk checks (spec 001 phase 7): Uninstall in
   Settings > Apps now removes an install for everyone. Settings starts the
