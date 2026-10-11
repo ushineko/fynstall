@@ -61,6 +61,9 @@ type Manifest struct {
 	Welcome string `json:"welcome,omitempty"`
 	// Launch is the payload file the finish page offers to start.
 	Launch string `json:"launch,omitempty"`
+	// Compat is "nsis" when the installer also takes the switches of an NSIS
+	// installer (spec 002 L1), and "" otherwise.
+	Compat string `json:"compat,omitempty"`
 	// GUI is true when the installer and its uninstaller have the wizard.
 	// The launcher then gets an Uninstall action, which needs no terminal.
 	GUI bool `json:"gui,omitempty"`

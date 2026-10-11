@@ -45,7 +45,19 @@ func Install(args []string, p Payload, e Env) int {
 	fl.StringVar(&f.scope, "scope", "", "install scope: user, or system for everyone on this computer")
 	applyPlanFile := fl.String("apply-plan", "", "used by the installer itself: apply the plan in this file as root")
 	paramValues := paramFlags(fl, m)
+	if m.Compat == CompatNSIS {
+		if args, err = nsisArgs(args, m); err != nil {
+			_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
+			return exitUsage
+		}
+	}
 	if err := fl.Parse(args); err != nil {
+		return exitUsage
+	}
+	if fl.NArg() > 0 {
+		// An argument that is not a flag was never used. Refused, so a
+		// mistyped one is not an install with something left out.
+		_, _ = fmt.Fprintf(e.Err, "installer: %q is not a flag of this installer (--help lists them)\n", fl.Arg(0))
 		return exitUsage
 	}
 	f.params = paramValues()

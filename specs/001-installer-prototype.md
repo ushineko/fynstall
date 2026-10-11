@@ -1012,6 +1012,41 @@ Phase 7d, services:
       against the stand-in; with the real service manager it is part of
       the desk check: run the installer a second time).
 
+Chosen for 7d, the NSIS switches (2026-10-10, spec 002 L1), for the
+maintainer to confirm in the PR. The config gains one key, `cli.compat`,
+as L1 names it; the manifest gains `compat`. The receipt does not change.
+
+- The switches are rewritten into the installer's own flags before the
+  flags are read, so they cannot behave differently from them.
+- `/S` is `--yes`. It does not also mean `--quiet`: the installer has no
+  such flag, and what it prints goes to a console that a silent caller does
+  not show.
+- `/D=` takes the rest of the command line, joined with spaces, since NSIS
+  reads a directory with spaces unquoted.
+- A parameter's name matches without regard to case, `-` or `_`, because
+  NSIS scripts write `/ServerUrl=` and a parameter is `server-url`.
+- Any other argument that starts with `/` is refused. `/NCRC` is one: it
+  would have to be ignored, which is a behaviour of its own.
+- An installer now refuses an argument that is not a flag, on every
+  platform. Before, it ignored one, so `/S` given to an installer without
+  the key was an interactive install with nothing said. No test on Linux
+  passes such an argument; `make test` there is the check.
+- The uninstaller takes no `/S`. L1 names the installer only, and
+  `QuietUninstallString` is what Windows runs. Open, for the maintainer:
+  automation that ran the NSIS uninstaller with `/S` needs `--quiet`.
+
+Phase 7d, the NSIS switches:
+
+- [x] `/S`, `/D=` and `/<Name>=<value>` become `--yes`, `--dir=` and the
+      parameter's flag; anything else that starts with `/` is refused
+      (`TestTheSwitchesOfAnNSISInstallerBecomeTheInstallersOwn`).
+- [x] A real installer built with `cli.compat: nsis` installs silently into
+      a directory with a space given without quotes, takes parameters as
+      switches, and repairs itself with `/S` alone, keeping its parameters;
+      an installer without the key refuses `/S`
+      (`TestAnInstallerTakesTheSwitchesOfTheNSISInstallerItReplaces`).
+- [x] `cli.compat` takes only `nsis` (`TestEveryErrorHasItsLineAndField`).
+
 The whole of phase 7:
 
 - [ ] `fynstall build --target windows/amd64` from Linux produces an `.exe`

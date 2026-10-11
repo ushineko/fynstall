@@ -27,6 +27,7 @@ the Windows Uninstall registry entry, have no keys of their own.
 - [actions](#actions)
 - [uninstall](#uninstall)
 - [ui](#ui)
+- [cli](#cli)
 - [targets](#targets)
 - [Placeholders](#placeholders)
 - [What an install writes](#what-an-install-writes)
@@ -395,6 +396,32 @@ What the wizard shows.
 |---|---|
 | `welcome` | A Markdown file for the first page. Without it, the page says what is installed, by whom, and that it needs no administrator rights. |
 | `launch` | A payload destination that the finish page offers to start. It can use `{os}`, `{arch}` and `{exe}`. |
+
+## cli
+
+What the installer takes on its command line beyond its own flags.
+
+| Key | Meaning |
+|---|---|
+| `compat` | `nsis`: the installer also takes the switches of an NSIS installer. Without the key it takes only its own flags. |
+
+`compat: nsis` is for a program that had an NSIS installer. What ran that
+installer (a deployment script, an MSI wrapper, the program's own update)
+runs the new one with the same command line.
+
+| Switch | Is the same as |
+|---|---|
+| `/S` | `--yes` |
+| `/D=<directory>` | `--dir=<directory>`. It is the last switch and takes the rest of the line, so a directory with spaces needs no quotes, as with NSIS. |
+| `/<Name>=<value>` | `--<name>=<value>` for a parameter. The name matches without regard to case, `-` or `_`: `/ServerUrl=` sets `server-url`. |
+
+Each switch becomes the flag beside it and does nothing else. The
+installer's own flags work as before, and can be mixed with the switches.
+Any other argument that starts with `/` stops the installer with a
+message. The key means the same on every platform, though only a caller on
+Windows is likely to use the switches.
+
+The uninstaller does not take `/S`. Run it with `--yes` or `--quiet`.
 
 ## targets
 

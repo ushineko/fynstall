@@ -148,6 +148,10 @@ func validate(c *Config, root *yaml.Node) Errors {
 		}
 	}
 
+	if c.CLI.Compat != "" && c.CLI.Compat != "nsis" {
+		k.fail(k.line("cli", "compat"), "cli.compat", "%q is not a command line this installer can also take (want nsis)", c.CLI.Compat)
+	}
+
 	if len(c.Payload) == 0 {
 		k.fail(k.line("payload"), "payload", "at least one entry is required")
 	}

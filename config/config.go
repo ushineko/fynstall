@@ -37,7 +37,15 @@ type Config struct {
 	Actions     []Action    `yaml:"actions"`
 	Uninstall   Uninstall   `yaml:"uninstall"`
 	UI          UI          `yaml:"ui"`
+	CLI         CLI         `yaml:"cli"`
 	Targets     []string    `yaml:"targets"`
+}
+
+// CLI is what the installer takes on its command line beyond its own flags.
+type CLI struct {
+	// Compat is nsis, to take the switches of an NSIS installer as well
+	// (/S, /D=<dir> and /<Name>=<value>), or empty (spec 002 L1).
+	Compat string `yaml:"compat"`
 }
 
 // Parameter is a value the installer asks for or is given (spec 002 D3a):

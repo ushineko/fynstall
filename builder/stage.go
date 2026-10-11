@@ -98,6 +98,7 @@ func stage(c *config.Config, runtimeVersion, target string) (*manifest.Manifest,
 	sort.Slice(links, func(i, j int) bool { return links[i].Path < links[j].Path })
 	m.Symlinks = links
 	m.UninstallRemove = c.Uninstall.Remove
+	m.Compat = c.CLI.Compat
 	for _, p := range c.Parameters {
 		m.Parameters = append(m.Parameters, manifest.Parameter(p))
 	}
