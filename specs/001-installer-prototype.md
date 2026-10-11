@@ -1060,11 +1060,15 @@ The whole of phase 7:
       directory is gone after a reboot (R9f). A system install shows one UAC
       prompt.
 - [ ] `--cli-only` Windows installer works over SSH or in a plain console.
-- [ ] The same `examples/hello` config, unchanged, builds the Windows
+- [x] The same `examples/hello` config, unchanged, builds the Windows
       installer: per-target payloads (spec 002 D1a) and platform
       equivalents of existing keys (L10), with no `platform:` block.
+      (CLI-only in 7b, with the wizard in 7c. `examples/beacon` builds for
+      Windows from one config too, in 7d.)
 - [ ] Windows backends for the actions (spec 002 D2a: `service` through the
       SCM, with recovery actions) and spec 002 L1, L2, L6, L7 and L8.
+      (The service, L1, L7 and L8 are done, in 7b and 7d. L2 and L6 are
+      not: see "Open after 7d".)
 
 Carried from the Linux phases (written 2026-10-09, before phase 7 starts).
 Phases 4b to 6b built these on Linux; each needs its Windows half, and some
@@ -1080,7 +1084,9 @@ need a decision first.
       and scope (`Local\` for per-user, `Global\` for system), with the same
       refusal message as on Linux. (Phase 7a; the `Global\` name is written
       and runs first with system scope.)
-- [ ] The privileged helper under UAC (R13, R14): the installer and the
+- [x] (Phase 7c, second part: two named pipes. The prompt itself is that
+      part's desk check, which is open.)
+      The privileged helper under UAC (R13, R14): the installer and the
       uninstaller stay the person's own processes and run themselves with
       `--apply-plan` or `--apply-uninstall` through `ShellExecuteEx` with
       `runas`. Decide first how events come back: `ShellExecuteEx` gives no
@@ -1088,14 +1094,21 @@ need a decision first.
       person and the helper can open, and a way for the parent to cancel it,
       as stdin does on Linux. The plan file and its digest check are as on
       Linux, in a directory only the person can write.
-- [ ] The window never runs elevated: an installer started as an
+- [x] The window never runs elevated: an installer started as an
       administrator uses the command line, or refuses `--gui`, as on Linux.
-- [ ] System paths and records: the install index for system scope (Linux
+      (Phase 7c, first part; the manifest of 7d says `asInvoker`.)
+- [x] (Phase 7c, second part: `%ProgramData%\fynstall\installs`, with the
+      record owned by the administrators.)
+      System paths and records: the install index for system scope (Linux
       uses `/var/lib/fynstall/installs`; decide `%ProgramData%\fynstall\installs`
       or the registry), the lock and the run directory, and what `{data}`,
       `{config}` and `{bin}` are per scope. `docs/platforms.md` gets a
       Windows section.
-- [ ] R9f, the uninstaller removing itself: a running `.exe` cannot delete
+- [x] (Both scopes move the running file to `%TEMP%`; system scope in 7c,
+      where the helper's request to delete it at the next start is
+      accepted. That the file is gone after a restart has not been looked
+      at: it is in the VM desk check above.)
+      R9f, the uninstaller removing itself: a running `.exe` cannot delete
       itself. Decide between `MoveFileEx` with `MOVEFILE_DELAY_UNTIL_REBOOT`
       (needs administrator rights for system scope) and a copy of the
       uninstaller run from `%TEMP%` that removes the original and then
@@ -1104,26 +1117,57 @@ need a decision first.
       file is moved to `%TEMP%`. System scope, where the helper is an
       administrator and the delete at the next start is allowed, is still
       to do.)
-- [ ] Upgrade, repair and downgrade (phase 6a) on Windows: the old
+- [x] Upgrade, repair and downgrade (phase 6a) on Windows: the old
       `uninstall.exe` is probed with `-h` and run with `--upgrade` or
       `--quiet`, a running service is stopped through the SCM before its
       files are replaced, and a system upgrade asks for UAC once.
-- [ ] The leftovers question and `--remove-leftovers` (spec 002 D5) on
+      (Per-user in 7a, a system repair in 7c, the service in 7d. One prompt
+      for a system upgrade is in the desk checks of 7c and 7d, which are
+      open.)
+- [x] The leftovers question and `--remove-leftovers` (spec 002 D5) on
       Windows, including the system case, where the elevated helper waits for
       the answer as it does on Linux.
-- [ ] The Uninstall registry entry's `UninstallString` and
+      (`TestLeftoversAreListedOrRemoved`,
+      `TestLeftoversOfASystemInstallAreListedOrRemoved`, and the window in
+      `installer/gui_test.go`. The window's question in a system install has
+      no test on Windows.)
+- [x] The Uninstall registry entry's `UninstallString` and
       `QuietUninstallString` (L8) run the installed `uninstall.exe`, so
       Settings > Apps goes through the installed uninstaller (R9e).
-      (Per-user in phase 7b; HKLM comes with system scope.)
-- [ ] Spec 002 L10 on Windows: `integration.path_links` adds the install's
+      (Per-user in phase 7b; under `HKLM` in 7c,
+      `TestASystemInstallGoesThroughTheHelperAndComesOutAgain`.)
+- [x] Spec 002 L10 on Windows: `integration.path_links` adds the install's
       `bin` to the person's or the machine's `PATH`, recorded and restored
       like any registry value, and `integration.desktop` makes a Start Menu
       shortcut; the uninstall restores `PATH` as it was.
       (Per-user in phase 7b, with `PATH` edited rather than restored; the
-      machine's `PATH` comes with system scope.)
-- [ ] Payload symlinks become copies on a Windows target (spec 002 D4a,
+      machine's `PATH` in 7c.)
+- [x] Payload symlinks become copies on a Windows target (spec 002 D4a,
       done in the builder): a desk check installs a payload that has links
-      and runs the copied files.
+      and runs the copied files. (2026-10-10: see Verification, phase 7d.)
+
+Open after 7d. None of these is started.
+
+- **L4, permissions.** It waits for the decision that the criterion above
+  names: which account the `service` role is, on both platforms. On
+  Windows a service runs as LocalSystem today, so `service` would be that
+  account unless the service action gains a `user:`.
+- **L2, prerequisites.** A minimum OS version is a different number on
+  each OS, so its key cannot mean the same thing everywhere, and the
+  one-config rule sends that to the maintainer before a key is added. The
+  architecture half needs no key: an installer is built for one target and
+  refuses another. The manifest of 7d already makes Windows report its
+  real version.
+- **L6, signing.** A `sign` command template that the builder runs. It is
+  work in the builder, the same on every OS, and needs a certificate to
+  check for real. Signing also puts a time in the file, so the test of
+  reproducible builds needs a rule for signed builds.
+- **`stop_processes`** on the service action (spec 002 D2a).
+- **A full installer for Windows built from Linux** with
+  `x86_64-w64-mingw32-gcc` (R18), and the first criterion of this list.
+- **`/S` for the uninstaller**, and a `--quiet` for the installer.
+- **Per-user installs of a config with a service** on Windows, which stop
+  at the plan today.
 
 ### Later (not this spec)
 
@@ -1262,6 +1306,56 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 7d (2026-10-10)
+
+Same machine as 7a to 7c, from an elevated console. After each of the three
+parts, `go test -race ./...` passes and golangci-lint v2.12.2 reports 0
+issues. `govulncheck` was not run; no module was added
+(`golang.org/x/sys/windows/svc` is a package of a module this project
+already requires). No mutation checks were run.
+
+Nothing ran on Linux. The CLI-only code and the tests compile for Linux
+(`go vet -tags nogui` and a compile of the tests, with `GOOS=linux`). These
+changes reach Linux, and `make test` and `make lint` there are their first
+check:
+
+- `examples/beacon`: `serve` takes a channel that is nil off Windows, and
+  the config names `bin/beacon{exe}`. `make beacon` adds the suffix of the
+  machine that builds.
+- The engine asks `platform.Services` before it plans or undoes a service,
+  and plans a directory for a unit file only when there is one.
+- The builder makes the resources of each generated program in one
+  function, which returns nothing for a Linux target.
+- An installer refuses an argument that is not a flag.
+- The config has `cli.compat`, and the manifest `compat`.
+
+The real service manager, by the test that is off unless asked for
+(`FYNSTALL_TEST_REAL_SERVICES=1`): it registered `examples/beacon` as
+`fynstall-test-<number>`, running as LocalSystem from a temporary
+directory, with three restarts as its recovery actions; started it and
+found it running; stopped and removed it; and then deleted the program's
+file, which Windows refuses while the process lives. Afterwards
+`sc query` listed no service of that name. This changed the machine for
+about three seconds, which is why the test does not run by default.
+
+After all the test runs: no `HKCU\Software\fynstall-test` key, no service
+named `beacon` or `hello`, and no `Services\beacon` key.
+
+By hand, the payload with links (spec 002 D4a). A payload directory with a
+program, a link to it beside it (`greet.exe -> greet-1.0.exe`) and a link
+to its directory (`current -> lib`), made with `mklink`. `fynstall build
+--cli-only` built it. The installer, run with a scratch profile and a
+registry root of its own, wrote four regular files and no link: the
+program, its copy under the link's name, and both again under `current`,
+all with the same hash. Both copies ran and printed `greet from
+windows/amd64`. The uninstaller left no file in the profile and no key.
+
+Not done, and for a person at a console that is not elevated: the desk
+check of the service in the phase list, with its UAC prompts, and every
+desk check that phases 7a to 7c left open. No installer built in 7d has
+been started by a double-click, and nobody has looked at Properties >
+Details; Windows read the version back in a test.
 
 ### Phase 7c, second part (2026-10-10)
 

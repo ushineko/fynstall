@@ -826,3 +826,33 @@ func TestAnInstallerTakesTheSwitchesOfTheNSISInstallerItReplaces(t *testing.T) {
 	require.Contains(t, out, `"/S" is not a flag of this installer`)
 	require.Equal(t, before, h.snap(t))
 }
+
+// The files a program made in an install for everyone: the uninstaller's
+// helper lists them through the person's own process, and removes them only
+// when asked to (spec 002 D5).
+func TestLeftoversOfASystemInstallAreListedOrRemoved(t *testing.T) {
+	for _, remove := range []bool{false, true} {
+		h := newHome(t, "io.example.shell")
+		before := h.snap(t)
+		code, out := h.run(t, shell.Installer, "--yes", "--scope", "system")
+		require.Equal(t, 0, code, out)
+		root := filepath.Join(h.sys, "Program Files", "io.example.shell")
+		made := filepath.Join(root, "bin", "cache", "state.db")
+		require.NoError(t, os.MkdirAll(filepath.Dir(made), 0o750))
+		require.NoError(t, os.WriteFile(made, []byte("made by the program"), 0o600))
+
+		if !remove {
+			code, out = h.run(t, filepath.Join(root, "uninstall.exe"))
+			require.Equal(t, 0, code, out)
+			require.Contains(t, out, "Left 1 file the program made")
+			require.Contains(t, out, made)
+			require.FileExists(t, made, "listed, not deleted")
+			require.NoFileExists(t, filepath.Join(root, "uninstall.exe"))
+			continue
+		}
+		code, out = h.run(t, filepath.Join(root, "uninstall.exe"), "--remove-leftovers")
+		require.Equal(t, 0, code, out)
+		require.NotContains(t, out, "Left ")
+		require.Equal(t, before, h.snap(t))
+	}
+}
