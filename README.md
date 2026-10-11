@@ -1,6 +1,6 @@
 # fynstall
 
-**Version**: 0.1.0
+**Version**: 0.1.1
 
 An installer framework for Go and [Fyne](https://fyne.io) programs. You
 describe a program in `fynstall.yaml`, and `fynstall build` produces one
@@ -57,10 +57,12 @@ it does not ask: running it is the decision. A newer installer's
 over to that same installed file.
 
 An installer is pinned to the version of the fynstall that built it. A
-released builder is one built with `make build` in a checkout that sits on
-a release's tag, such as `v0.1.0`, with nothing modified; it needs no more
-than the config. A builder made any other way, `go install` included, does
-not know which release it is: build against a checkout with it,
+released builder is one made from a release's tag, such as `v0.1.1`, in
+either of two ways: `go install github.com/ushineko/fynstall/cmd/fynstall@v0.1.1`,
+or `make build` in a checkout that sits on the tag with nothing modified.
+It needs no more than the config. A builder made any other way, such as
+`go install` of a commit or of `@latest` before a release, or a build of a
+changed checkout, says `dev`: build against a checkout with it,
 `fynstall build --runtime-path <path to fynstall>`.
 
 The config format is in [docs/config.md](docs/config.md), and what an install
@@ -130,6 +132,24 @@ MIT. See [LICENSE](LICENSE).
   shortcut in the Startup folder on Windows. The plan lists it and the
   uninstaller removes it
   ([#35](https://github.com/ushineko/fynstall/issues/35)).
+
+### 0.1.1 (2026-10-11)
+
+- A builder from `go install` knows its release: with no version stamped
+  by the Makefile, the builder reads the module version that the Go
+  toolchain records. `go install github.com/ushineko/fynstall/cmd/fynstall@v0.1.1`
+  gives a builder that says `0.1.1` and builds installers with no
+  `--runtime-path`. Only a release tag counts: a commit, a pseudo-version
+  or a changed checkout still says `dev`. `make build` on Windows writes
+  `bin/fynstall.exe` ([#36](https://github.com/ushineko/fynstall/issues/36)).
+
+- A failed uninstall can be finished (spec 004): an uninstall that cannot
+  remove a file keeps the receipt, the index entry and the uninstaller, and
+  removes them last, so the uninstaller or a repair can be run again. On
+  Windows the uninstaller tries a file that another program has open again
+  for about 5 seconds. `--force-receipt-uninstall` also removes an install
+  that an older uninstaller left without its index entry
+  ([#33](https://github.com/ushineko/fynstall/issues/33)).
 
 ### 0.1.0 (2026-10-10)
 

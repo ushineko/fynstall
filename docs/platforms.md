@@ -250,6 +250,25 @@ The move is a rename, so the temporary directory and the install directory
 must be on the same drive. On different drives the uninstaller reports that
 it did not remove `uninstall.exe`, and leaves it and the install directory.
 
+### A file that is in use
+
+Windows refuses to delete a file that another program has open, for example
+a running copy of the program or a scanner that reads a new file. The
+uninstaller tries such a file again, first after 100 ms and then after
+longer waits, for about 5 seconds in one uninstall. A file that is still in
+use after that is an error.
+
+On every platform, an uninstall that fails keeps the receipt, the index
+entry and the uninstaller, and removes them last when it succeeds. Close
+the program and run the uninstaller again, or run the installer again to
+repair. A repair, an upgrade and a downgrade run the installed uninstaller
+first, so they stop in the same way and can be run again in the same way.
+
+The uninstaller of fynstall 0.1.0 removes the index entry and its own file
+first. When it fails, run a newer installer of the program with
+`--force-receipt-uninstall`: the installer reads the receipt in the default
+install directory and removes what is left.
+
 ### One installer at a time
 
 The lock is a named mutex. Windows removes it when the process that holds it

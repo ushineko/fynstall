@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -855,4 +856,82 @@ func TestLeftoversOfASystemInstallAreListedOrRemoved(t *testing.T) {
 		require.NotContains(t, out, "Left ")
 		require.Equal(t, before, h.snap(t))
 	}
+}
+
+// The index entry of an install, wherever the profile puts it.
+func (h home) index(id string) string {
+	return filepath.Join(h.dir, "AppData", "Local", "fynstall", "installs", id+".json")
+}
+
+// A file of the installed version that Windows will not delete stops the
+// repair. What is left is still an install: its record, its uninstaller and
+// its index entry are there, so it can be repaired again or removed
+// (spec 004 R1, R2).
+func TestARepairThatCannotRemoveAFileLeavesAnInstallThatCanBeRepaired(t *testing.T) {
+	h := greetHome(t)
+	before := h.snap(t)
+	code, out := h.run(t, v1Art.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+
+	// Held open without FILE_SHARE_DELETE, as a scanner or a running copy
+	// holds it.
+	prog := filepath.Join(h.root, "bin", "greet.exe")
+	held, err := os.Open(prog)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = held.Close() })
+	code, out = h.run(t, v2Art.Installer, "--yes", "--verbose")
+	require.Equal(t, 1, code, out)
+	require.Contains(t, out, "run "+h.uninstaller()+" to finish removing it, or run this installer again")
+	require.NotContains(t, out, "removed "+prog, "what was not removed is not reported as removed")
+	for _, p := range []string{filepath.Join(h.root, ".fynstall", "receipt.json"), h.uninstaller(), h.index("io.ushineko.greet"), prog} {
+		_, err := os.Stat(p)
+		require.NoError(t, err, "%s is still there", p)
+	}
+	require.Empty(t, h.movedAside(t), "the uninstaller did not move itself aside")
+	require.NoError(t, held.Close())
+
+	code, out = h.run(t, v2Art.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "Repairs Greet 0.1.0")
+	require.Equal(t, sum(t, v2Art.Uninstaller), sum(t, h.uninstaller()))
+
+	code, out = h.run(t, h.uninstaller(), "--yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
+}
+
+// A file that is let go of while the uninstaller waits is removed, and the
+// uninstall succeeds (spec 004 R3).
+func TestAFileInUseForAMomentIsRemovedOnALaterTry(t *testing.T) {
+	h := greetHome(t)
+	before := h.snap(t)
+	code, out := h.run(t, v1Art.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+
+	held, err := os.Open(filepath.Join(h.root, "bin", "greet.exe"))
+	require.NoError(t, err)
+	timer := time.AfterFunc(time.Second, func() { _ = held.Close() })
+	t.Cleanup(func() { timer.Stop(); _ = held.Close() })
+
+	code, out = h.run(t, h.uninstaller(), "--yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
+}
+
+// The uninstaller of fynstall 0.1.0 removed the index entry and itself
+// before it failed. The installer still finds that install by its record in
+// the default directory, and removes it (spec 004 R4).
+func TestAnInstallWithNoIndexEntryIsRemovedByItsRecord(t *testing.T) {
+	h := greetHome(t)
+	before := h.snap(t)
+	code, out := h.run(t, v1Art.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	require.NoError(t, os.Remove(h.index("io.ushineko.greet")))
+	require.NoError(t, os.Remove(h.uninstaller()))
+
+	code, out = h.run(t, v1Art.Installer, "--force-receipt-uninstall", "--yes")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "with this installer's engine, not its own uninstaller")
+	// The folder of index entries was made by the install and is empty.
+	require.Equal(t, before, h.snap(t))
 }

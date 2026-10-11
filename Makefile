@@ -88,7 +88,7 @@ vuln: ## Check dependencies for known vulnerabilities
 
 .PHONY: build
 build: ## Build the fynstall builder into bin/
-	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o bin/fynstall ./cmd/fynstall
+	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o bin/fynstall$(shell go env GOEXE) ./cmd/fynstall
 
 # The example program every test and desk check installs. Needs cgo and the
 # graphics headers, as any Fyne window does.
