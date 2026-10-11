@@ -14,6 +14,7 @@ import (
 	"slices"
 
 	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/platform"
 )
 
 // EventKind sorts events for a front end.
@@ -60,6 +61,8 @@ const (
 	StepDirs    = "Creating directories"
 	StepFiles   = "Copying files"
 	StepLinks   = "Linking"
+	// StepShell is the Start Menu, the Uninstall entry and PATH, on Windows.
+	StepShell   = "Registering with Windows"
 	StepActions = "Configuring"
 	StepRecord  = "Recording the install"
 )
@@ -67,7 +70,7 @@ const (
 // Steps names the steps Apply will report for p, so a front end can show
 // them before the install starts.
 func Steps(p *Plan) []string {
-	return stepNames(p.Replaces != "", len(p.Links) > 0, len(p.Actions) > 0)
+	return stepNames(p.Replaces != "", len(p.Links) > 0, p.HasShellIntegration(), len(p.Actions) > 0)
 }
 
 // ManifestSteps is Steps before there is a plan: the steps depend only on
@@ -78,10 +81,12 @@ func ManifestSteps(m *manifest.Manifest, replaces bool) []string {
 	for _, a := range m.Actions {
 		actions = actions || a.Run == nil || !a.Run.Hook
 	}
-	return stepNames(replaces, len(m.Links) > 0, actions)
+	// Windows has no links, and every install there has its registry entry.
+	shell := platform.Integration == platform.WindowsShell
+	return stepNames(replaces, len(m.Links) > 0 && platform.Integration == platform.XDG, shell, actions)
 }
 
-func stepNames(replaces, links, actions bool) []string {
+func stepNames(replaces, links, shell, actions bool) []string {
 	var s []string
 	if replaces {
 		s = append(s, StepReplace)
@@ -89,6 +94,9 @@ func stepNames(replaces, links, actions bool) []string {
 	s = append(s, StepDirs, StepFiles)
 	if links {
 		s = append(s, StepLinks)
+	}
+	if shell {
+		s = append(s, StepShell)
 	}
 	if actions {
 		s = append(s, StepActions)
@@ -177,6 +185,13 @@ func Apply(ctx context.Context, p *Plan, payload fs.FS, uninstaller []byte, repo
 			return nil, err
 		}
 		report.emit(Detail, "%s -> %s", l.Dst, l.Target)
+	}
+
+	if p.HasShellIntegration() {
+		report.step(steps, StepShell)
+		if err := j.applyShell(p); err != nil {
+			return nil, err
+		}
 	}
 
 	if len(p.Actions) > 0 {
@@ -364,6 +379,8 @@ func (j *journal) undoFiles(keep []string) error {
 		case OpReplace:
 			err = j.restore(e)
 			j.report.emit(Detail, "restored %s", e.Path)
+		case OpRegKey, OpRegValue, OpPath:
+			err = j.undoRegistry(e)
 		default:
 			err = j.undoAction(e)
 		}

@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ushineko/fynstall/builder"
+	"github.com/ushineko/fynstall/internal/regtest"
 	"github.com/ushineko/fynstall/internal/snapshot"
 )
 
@@ -45,6 +46,7 @@ var (
 	v2Art     builder.Artifact // differs only in its stamped runtime version
 	greet020  builder.Artifact // app version 0.2.0: an upgrade
 	twoScopes builder.Artifact // a config that offers user and system scope
+	shell     builder.Artifact // a launcher entry, an icon, a link and a publisher
 	setupFail error
 )
 
@@ -144,7 +146,25 @@ func setup(work string) error {
 			return err
 		}
 	}
-	twoScopes, err = one(filepath.Join(dir, "fynstall.yaml"), v1, "scopes-dist")
+	if twoScopes, err = one(filepath.Join(dir, "fynstall.yaml"), v1, "scopes-dist"); err != nil {
+		return err
+	}
+
+	// A program with everything the Windows shell is told about.
+	dir = filepath.Join(work, "shell")
+	cfg = "app:\n  id: io.example.shell\n  name: Shell Example\n  version: 1.2.3\n  publisher: Example Makers\n  icon: icon.png\n" +
+		"payload:\n  - src: greet.exe\n    dst: bin/greet.exe\n" +
+		"integration:\n  path_links: [bin/greet.exe]\n  desktop:\n    - name: Shell Example\n      comment: Greets\n      exec: bin/greet.exe\n      args: [--flag, two words]\n"
+	if err := copyFile(filepath.Join(src, "build", "windows-amd64", "greet.exe"), filepath.Join(dir, "greet.exe")); err != nil {
+		return err
+	}
+	if err := copyFile(filepath.Join(repo, "examples", "hello", "hello.png"), filepath.Join(dir, "icon.png")); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fynstall.yaml"), []byte(cfg), 0o600); err != nil {
+		return err
+	}
+	shell, err = one(filepath.Join(dir, "fynstall.yaml"), v1, "shell-dist")
 	return err
 }
 
@@ -167,13 +187,16 @@ type home struct {
 	root string
 	tmp  string
 	path string
+	// reg is the test's own registry root, below HKCU: the installer writes
+	// its Uninstall entry and PATH there, never in the real ones.
+	reg string
 }
 
 func newHome(t *testing.T, id string) home {
 	t.Helper()
 	require.NoError(t, setupFail)
 	d := t.TempDir()
-	return home{dir: d, root: filepath.Join(d, "AppData", "Local", id), tmp: t.TempDir(), path: t.TempDir()}
+	return home{dir: d, root: filepath.Join(d, "AppData", "Local", id), tmp: t.TempDir(), path: t.TempDir(), reg: regtest.Root(t)}
 }
 
 func greetHome(t *testing.T) home { return newHome(t, "io.ushineko.greet") }
@@ -190,7 +213,9 @@ func (h home) uninstaller() string { return filepath.Join(h.root, "uninstall.exe
 func (h home) run(t *testing.T, prog string, args ...string) (int, string) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), prog, args...)
-	cmd.Env = []string{"USERPROFILE=" + h.dir, "PATH=" + h.path, "TEMP=" + h.tmp, "TMP=" + h.tmp, "SystemRoot=" + os.Getenv("SystemRoot")}
+	require.NotEmpty(t, h.reg, "without its own registry root an installer would write the real registry")
+	cmd.Env = []string{"USERPROFILE=" + h.dir, "PATH=" + h.path, "TEMP=" + h.tmp, "TMP=" + h.tmp,
+		"SystemRoot=" + os.Getenv("SystemRoot"), regtest.Env + "=" + h.reg}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -206,7 +231,19 @@ func (h home) snap(t *testing.T) map[string]string {
 	t.Helper()
 	s, err := snapshot.Take(h.dir)
 	require.NoError(t, err)
+	// The registry is part of "as it was" (R9d).
+	for k, v := range regtest.Snapshot(t, h.reg) {
+		s["registry:"+k] = v
+	}
 	return s
+}
+
+// value reads a registry value the installer wrote, by its real key.
+func (h home) value(t *testing.T, key, name string) string {
+	t.Helper()
+	v, ok := regtest.Get(t, h.reg, key, name)
+	require.True(t, ok, "%s in %s", name, key)
+	return v
 }
 
 // movedAside lists the uninstallers that moved themselves to the temporary
@@ -233,7 +270,10 @@ func TestInstallWritesThePayloadAndTheUninstallerRemovesIt(t *testing.T) {
 	code, out := h.run(t, v1Art.Installer, "--cli", "--yes", "--name=Ada", "--token=example-not-a-credential")
 	require.Equal(t, 0, code, out)
 	require.Contains(t, out, "To remove it, run "+h.uninstaller())
-	require.Contains(t, out, "links on PATH are not applied on this platform yet", "greet asks for a link, which Windows does not have yet")
+	bin := filepath.Join(h.root, "bin")
+	require.Contains(t, out, "PATH     "+bin+" is added to yours", "the plan says so before it is done")
+	require.Contains(t, out, bin+" is on your PATH.")
+	require.Equal(t, bin, h.value(t, `HKCU\Environment`, "Path"), "greet's link is a PATH entry on Windows (spec 002 L10)")
 	require.Equal(t, sum(t, filepath.Join(src, "build", "windows-amd64", "greet.exe")), sum(t, filepath.Join(h.root, "bin", "greet.exe")))
 	require.Equal(t, sum(t, v1Art.Uninstaller), sum(t, h.uninstaller()),
 		"the installed uninstaller is the separate artifact in dist (R9b, R9c)")
@@ -446,4 +486,104 @@ func TestLeftoversAreListedOrRemoved(t *testing.T) {
 		require.NotContains(t, out, "Left ")
 		require.Equal(t, before, h.snap(t))
 	}
+}
+
+const shellUninstallKey = `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\io.example.shell`
+
+// What Linux does with a .desktop file, an icon theme and a link, Windows
+// does with a Start Menu shortcut, an .ico and PATH; and every install has
+// the entry Settings > Apps lists (R18, spec 002 L8 and L10).
+func TestAnInstallIsInTheStartMenuInSettingsAndOnPath(t *testing.T) {
+	h := newHome(t, "io.example.shell")
+	before := h.snap(t)
+
+	code, out := h.run(t, shell.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "==> Registering with Windows")
+
+	icon := filepath.Join(h.root, ".fynstall", "app.ico")
+	b, err := os.ReadFile(icon)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0, 0, 1, 0, 5, 0}, b[:6], "an icon file with five sizes")
+	uninstall := `"` + h.uninstaller() + `"`
+	for name, want := range map[string]string{
+		"DisplayName": "Shell Example", "DisplayVersion": "1.2.3", "Publisher": "Example Makers",
+		"InstallLocation": h.root, "DisplayIcon": icon,
+		"UninstallString": uninstall, "QuietUninstallString": uninstall + " --quiet",
+		"NoModify": "1", "NoRepair": "1",
+	} {
+		require.Equal(t, want, h.value(t, shellUninstallKey, name), name)
+	}
+	require.Equal(t, filepath.Join(h.root, "bin"), h.value(t, `HKCU\Environment`, "Path"))
+
+	// The shortcut, read back by the shell that Explorer uses.
+	lnk := filepath.Join(h.dir, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Shell Example.lnk")
+	_, err = os.Stat(lnk)
+	require.NoError(t, err)
+	if ps, err := exec.LookPath("powershell.exe"); err == nil {
+		script := `$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); ` +
+			`"$($s.TargetPath)|$($s.Arguments)|$($s.WorkingDirectory)|$($s.Description)|$($s.IconLocation)"`
+		cmd := exec.CommandContext(t.Context(), ps, "-NoProfile", "-NonInteractive", "-Command", script)
+		cmd.Env = append(os.Environ(), "LNK="+lnk)
+		got, err := cmd.Output()
+		require.NoError(t, err)
+		require.Equal(t, strings.Join([]string{
+			filepath.Join(h.root, "bin", "greet.exe"), `--flag "two words"`, h.root, "Greets", icon + ",0",
+		}, "|"), strings.TrimSpace(string(got)))
+	} else {
+		t.Log("powershell.exe is not on PATH; the shortcut was not read back")
+	}
+
+	// Settings > Apps runs QuietUninstallString, or UninstallString.
+	code, out = h.run(t, h.uninstaller(), "--quiet")
+	require.Equal(t, 0, code, out)
+	require.Empty(t, out, "--quiet prints only problems")
+	require.Equal(t, before, h.snap(t), "the files, the shortcut and the registry")
+}
+
+// A shortcut and a PATH that were there before are as they were after.
+func TestUninstallPutsBackTheShortcutAndLeavesTheRestOfPath(t *testing.T) {
+	h := newHome(t, "io.example.shell")
+	lnk := filepath.Join(h.dir, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Shell Example.lnk")
+	require.NoError(t, os.MkdirAll(filepath.Dir(lnk), 0o750))
+	require.NoError(t, os.WriteFile(lnk, []byte("the person's own shortcut"), 0o600))
+	regtest.Set(t, h.reg, `HKCU\Environment`, "Path", `C:\one;%USERPROFILE%\two`, true)
+	before := h.snap(t)
+
+	code, out := h.run(t, shell.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "shortcut "+lnk)
+	require.Contains(t, out, "replaces the one there")
+	require.Equal(t, `C:\one;%USERPROFILE%\two;`+filepath.Join(h.root, "bin"), h.value(t, `HKCU\Environment`, "Path"))
+
+	code, out = h.run(t, h.uninstaller())
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
+}
+
+// An upgrade goes through the old uninstaller, which takes its registry
+// entries with it, and the new version writes its own.
+func TestARepairLeavesOneSetOfRegistryEntries(t *testing.T) {
+	h := newHome(t, "io.example.shell")
+	before := h.snap(t)
+	code, out := h.run(t, shell.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	// A shortcut holds the times of the file it points at, which the repair
+	// wrote again, so its bytes differ.
+	const lnk = "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Shell Example.lnk"
+	installed := h.snap(t)
+	require.Contains(t, installed, lnk)
+	delete(installed, lnk)
+
+	code, out = h.run(t, shell.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "Repairs Shell Example 1.2.3")
+	repaired := h.snap(t)
+	require.Contains(t, repaired, lnk)
+	delete(repaired, lnk)
+	require.Equal(t, installed, repaired, "the same files, and PATH with the directory once")
+
+	code, out = h.run(t, h.uninstaller())
+	require.Equal(t, 0, code, out)
+	require.Equal(t, before, h.snap(t))
 }

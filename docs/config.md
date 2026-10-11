@@ -144,16 +144,19 @@ files once, so the copies do not make the installer larger.
 
 | Key | Meaning |
 |---|---|
-| `path_links` | Payload destinations to link into `{bin}`, each under its own base name. |
+| `path_links` | Payload programs to make available by name: a link in `{bin}` on Linux, the program's directory on `PATH` on Windows. |
 | `desktop` | Launcher entries. See below. |
 | `keep_on_uninstall` | Paths that the uninstaller never touches, such as the program's own settings. The uninstaller prints them, so the user knows where their data is. |
 
 **Links.** Each link is a symlink in `{bin}` (`~/.local/bin` for a per-user
 install) that points at the installed file. Two links cannot have the same
-name. If `{bin}` is not on the user's `PATH`, the installer says so.
+name. If `{bin}` is not on the user's `PATH`, the installer says so. On
+Windows there is no link: the installer adds the directory of each program
+to the user's `PATH`, and the uninstaller removes that entry.
 
 **Desktop entries.** Each entry is written to
-`{data}/applications/<id>.desktop`.
+`{data}/applications/<id>.desktop`. On Windows each entry is a Start Menu
+shortcut named for the entry's `name`; it uses `exec`, `args` and `comment`.
 
 | Key | Required | Meaning |
 |---|---|---|
@@ -408,9 +411,10 @@ Outside it:
 - `{config}/systemd/user/<name>.service` for each service, on Linux;
   `/etc/systemd/system/<name>.service` for a system install.
 
-On Windows the installer writes the index entry and nothing else outside
-the install directory, apart from the configuration files: launcher
-entries, icons and links are not applied there yet.
+On Windows a desktop entry is a Start Menu shortcut, the icon is one `.ico`
+file in the install directory, and a link is an entry on the user's `PATH`.
+Every install also has a registry key that Settings > Apps reads. See
+[platforms.md](platforms.md).
 
 A file or link that is already at one of these paths is saved first. A
 link is saved as its target, so the uninstaller puts back a link and not a

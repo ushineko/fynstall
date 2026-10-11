@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 
+	"github.com/ushineko/fynstall/internal/regtest"
 	"github.com/ushineko/fynstall/internal/snapshot"
 	"github.com/ushineko/fynstall/manifest"
 	"github.com/ushineko/fynstall/platform"
@@ -27,16 +28,29 @@ type fixture struct {
 	m       *manifest.Manifest
 	payload fstest.MapFS
 	env     func(string) string
+	// registry is the test's own registry root on Windows, and "" elsewhere.
+	registry string
 }
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{home: t.TempDir(), payload: fstest.MapFS{}}
+	f := &fixture{home: t.TempDir(), payload: fstest.MapFS{}, registry: regtest.Root(t)}
 	f.env = func(k string) string {
-		if k == "HOME" || k == "USERPROFILE" {
+		switch k {
+		case "HOME", "USERPROFILE":
 			return f.home
+		case regtest.Env:
+			return f.registry
 		}
 		return ""
+	}
+	// Before any install: a fixture whose registry writes would reach the
+	// real registry stops here.
+	if runtime.GOOS == "windows" {
+		v, err := platform.Vars("user", f.env)
+		require.NoError(t, err)
+		require.True(t, f.registry != "" && strings.HasPrefix(platform.RegKey(v, `HKCU\x`), `HKCU\`+f.registry+`\`),
+			"the test's registry root is not in use; refusing to run an install against the real registry")
 	}
 	f.m = &manifest.Manifest{
 		Schema: manifest.Schema, RuntimeVersion: "test",
@@ -86,7 +100,7 @@ func needsLinks(t *testing.T) {
 // {bin} on an OS whose backend does not make them.
 func needsIntegration(t *testing.T) {
 	t.Helper()
-	if !platform.HasDesktopIntegration {
+	if platform.Integration != platform.XDG {
 		t.Skip("this OS's backend makes no launcher entries or links yet")
 	}
 }
@@ -95,6 +109,10 @@ func (f *fixture) snap(t *testing.T) map[string]string {
 	t.Helper()
 	s, err := snapshot.Take(f.home)
 	require.NoError(t, err)
+	// The registry is part of "as it was" (R9d).
+	for k, v := range regtest.Snapshot(t, f.registry) {
+		s["registry:"+k] = v
+	}
 	return s
 }
 

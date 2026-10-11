@@ -49,6 +49,10 @@ func (p *Plan) digest(state bool) (string, error) {
 		Hooks              []Hook
 		Remove             []string
 		Replaces           string
+		Shortcuts          []PlannedShortcut
+		Registry           []PlannedKey
+		PathKey            string
+		PathDirs           []string
 	}{Scope: p.Scope, Root: p.Root, Index: p.Index, Keep: p.Keep, Hooks: p.Hooks, Remove: p.Manifest.UninstallRemove, Replaces: p.Replaces}
 	if state {
 		d.Dirs = p.Dirs
@@ -62,6 +66,11 @@ func (p *Plan) digest(state bool) (string, error) {
 	}
 	for _, l := range append(append([]PlannedLink{}, p.Symlinks...), p.Links...) {
 		d.Links = append(d.Links, link{Dst: l.Dst, Target: l.Target, Base: l.Base, Exists: state && l.Exists})
+	}
+	d.Registry, d.PathKey, d.PathDirs = p.Registry, p.PathKey, p.PathDirs
+	for _, s := range p.Shortcuts {
+		s.Exists = state && s.Exists
+		d.Shortcuts = append(d.Shortcuts, s)
 	}
 	for _, a := range p.Actions {
 		switch {

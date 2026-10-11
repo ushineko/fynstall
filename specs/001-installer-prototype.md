@@ -579,11 +579,12 @@ decision.
 ### Phase 7: Windows (R18, R19, R9f, registry restore in R9a/R9d)
 
 Several PRs, as phases 4 and 6 were. 7a is a per-user install and uninstall
-from the command line, and the tests running on Windows. Proposed for the
-rest: 7b the registry journal (the Uninstall entry, `PATH`), the Start Menu
-shortcut and the icon resource; 7c the wizard, mode selection (R19) and the
-helper under UAC with system scope; 7d services, permissions and the leaf
-requirements.
+from the command line, and the tests running on Windows. 7b is the registry
+journal (the Uninstall entry, `PATH`), the Start Menu shortcut and the
+`.ico`. Proposed for the rest: 7c the wizard, mode selection (R19) and the
+helper under UAC with system scope; 7d services, permissions, the leaf
+requirements, and the icon and version resources of the installer's own
+`.exe` (L7), which need one writer of Windows resource objects between them.
 
 Chosen for 7a (2026-10-10). Each is for the maintainer to confirm in the
 PR; none changes the config format or the receipt.
@@ -660,6 +661,82 @@ Phase 7a:
       plan; the uninstaller, run from another directory, leaves no install
       directory.
 
+Chosen for 7b (2026-10-10), for the maintainer to confirm in the PR. The
+config format does not change. The receipt gains three journal operations
+(`reg_key`, `reg_value`, `path`) and one field (`reg`), all additive; a
+receipt written on Linux is unchanged.
+
+- The plan holds the shortcuts, the registry keys with their values, and
+  the `PATH` directories. `--dry-run` and the install both list them.
+  Apply writes them in a step of their own, "Registering with Windows",
+  after the files and before the actions.
+- The registry journal: each key that Apply makes is an entry, outermost
+  first, and the uninstaller removes it only when it is empty. Each value
+  is an entry with the kind and content it had before, or a mark that it
+  was not there. A value of a kind other than a string or a 32-bit number
+  stops the install: the journal could not put it back.
+- `PATH` is not restored to its earlier content. Other installers change
+  it between this install and its uninstall, and writing the old content
+  back would remove their entries, which is the NSIS hazard spec 002 names.
+  The journal records the one directory added; the uninstaller takes that
+  entry out and leaves the rest, as Windows Installer does. A directory
+  already on `PATH` is not added and so never removed. This reads the
+  carried criterion "the uninstall restores `PATH` as it was" as "as it
+  would be without this install".
+- The shortcut is written through IShellLink, as R18 says, by calling the
+  object's method table from Go. That needs no C compiler, so the CLI-only
+  build keeps `CGO_ENABLED=0`, and no new dependency. Not chosen: writing
+  the `.lnk` format by hand, which would make the content known at plan
+  time but would be this project's own reading of a shell format.
+- The icon is one `.ico` (16, 32, 48 and 64 as bitmaps, 256 as a PNG),
+  made by the builder and carried as a payload file at
+  `.fynstall/app.ico`, so it is hashed, journalled and removed like any
+  file. A Windows manifest has no hicolor icons.
+- A shortcut is named for the entry's `name`. Launcher keys with no meaning
+  in a shortcut (`categories`, `keywords`, `terminal` and the rest) are not
+  used on Windows.
+- `UninstallString` runs the installed `uninstall.exe` (R9e), with `--gui`
+  in a full build, as the Linux launcher action does;
+  `QuietUninstallString` adds `--quiet`.
+- Tests write the registry under a root of their own
+  (`FYNSTALL_TEST_REGISTRY_ROOT`, a key below `HKCU`), as system paths go
+  under `FYNSTALL_TEST_SYSTEM_ROOT` on Linux. Unlike that variable it is
+  honoured in an elevated process: see Verification for why. The helper of
+  a system install must not take it from the process that starts it (7c).
+
+Phase 7b:
+
+- [x] Every install has an Uninstall registry entry with the L8 fields,
+      and its two commands run the installed `uninstall.exe`
+      (`TestAnInstallIsInTheStartMenuInSettingsAndOnPath`,
+      `TestAnInstallRegistersWithWindowsAndTheUninstallTakesItBack`).
+- [x] `integration.desktop` makes a Start Menu shortcut, which the Windows
+      shell reads back with the target, arguments, directory, description
+      and icon it was given (the first of those tests, through
+      `WScript.Shell`).
+- [x] `integration.path_links` adds the program's directory to the user's
+      `PATH`; the uninstall takes out that entry and leaves the rest, and a
+      directory already there is neither added nor removed
+      (`TestUninstallTakesItsOwnEntryOutOfPathAndLeavesTheRest`,
+      `TestADirectoryAlreadyOnPathIsNotAddedOrRemoved`).
+- [x] After an uninstall the registry and the files match their state
+      before the install: every Windows integration test compares both
+      (`regtest.Snapshot`), including with a value and a shortcut that were
+      there before (`TestRegistryValuesThatWereThereArePutBack`,
+      `TestUninstallPutsBackTheShortcutAndLeavesTheRestOfPath`).
+- [x] A failed install undoes its registry changes
+      (`TestAFailedInstallUndoesItsRegistryChanges`).
+- [x] A repair leaves one set of entries
+      (`TestARepairLeavesOneSetOfRegistryEntries`).
+- [x] `app.icon` becomes an `.ico` with five sizes, the same bytes for the
+      same source (`TestAWindowsTargetGetsTheIconAsAnIcoFile`).
+- [ ] Desk check on Windows 11, in the real profile: the program is in
+      Start with its icon and starts from there; it is in Settings > Apps
+      with its name, version, publisher, size and icon, and Uninstall there
+      removes it; a new console finds the program by name; `reg export` of
+      `HKCU\Environment` and of the Uninstall key before the install and
+      after the uninstall are identical (`fc`).
+
 The whole of phase 7:
 
 - [ ] `fynstall build --target windows/amd64` from Linux produces an `.exe`
@@ -727,10 +804,13 @@ need a decision first.
 - [ ] The Uninstall registry entry's `UninstallString` and
       `QuietUninstallString` (L8) run the installed `uninstall.exe`, so
       Settings > Apps goes through the installed uninstaller (R9e).
+      (Per-user in phase 7b; HKLM comes with system scope.)
 - [ ] Spec 002 L10 on Windows: `integration.path_links` adds the install's
       `bin` to the person's or the machine's `PATH`, recorded and restored
       like any registry value, and `integration.desktop` makes a Start Menu
       shortcut; the uninstall restores `PATH` as it was.
+      (Per-user in phase 7b, with `PATH` edited rather than restored; the
+      machine's `PATH` comes with system scope.)
 - [ ] Payload symlinks become copies on a Windows target (spec 002 D4a,
       done in the builder): a desk check installs a payload that has links
       and runs the copied files.
@@ -872,6 +952,39 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 7b (2026-10-10)
+
+Same machine as 7a. `go test -race ./...` passes, and golangci-lint
+v2.12.2 reports 0 issues. The code and the tests compile for Linux; nothing
+ran on Linux. `govulncheck` was not run; `golang.org/x/sys/windows/registry`
+is a package of a module this project already requires.
+
+A fault found while writing the tests, and what it changed. The registry
+root for tests was first ignored in an elevated process, copying the rule
+`FYNSTALL_TEST_SYSTEM_ROOT` has for root. The console the tests ran in was
+elevated, so the first run of the new engine tests wrote to the real
+registry of the person running them: two test directories were added to
+the user `PATH`, and one `Uninstall\io.example.hello` key was left. Both
+were removed by hand, and the `PATH` value was checked against a copy taken
+before the repair. Three things changed: the root is honoured in an
+elevated process; the engine fixture refuses to run an install unless its
+registry keys resolve under the test root; and the integration tests refuse
+to start a program without one.
+
+Mutations were not run for this phase.
+
+By hand, with an installer that has an icon, a launcher entry and a link,
+against a scratch profile and a registry root of its own: `--dry-run` listed
+the shortcut, the registry key with 10 values, the `PATH` entry and
+`app.ico`; the install wrote them; Windows (`System.Drawing.Icon`) loaded
+the `.ico` at 16, 32, 48 and 64 px with opaque centre pixels; the
+uninstaller left the profile and the registry root empty. `System.Drawing`
+does not read the 256 px PNG image of an icon file, so that size was checked
+only by the builder test, which decodes it.
+
+The desk check in the real profile, in the phase 7b list, is still to do:
+it is the first run that writes the real Start Menu, Settings and `PATH`.
 
 ### Phase 7a (2026-10-10)
 

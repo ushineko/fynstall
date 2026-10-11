@@ -41,6 +41,9 @@ const (
 	keyScope = "<scope>"
 	keyIndex = "<index>"
 	keyRoot  = "<root>"
+	// keyRegRoot and keyStartMenu are set by the Windows backend only.
+	keyRegRoot   = "<registry root>"
+	keyStartMenu = "<start menu>"
 )
 
 // absOr returns env's value for key when it is an absolute path, and def

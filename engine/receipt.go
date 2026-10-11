@@ -35,6 +35,15 @@ const (
 	// OpMigrate is data moved from From to Path. Undo, only for a failed
 	// install: move it back. Path is kept, so an uninstall leaves it.
 	OpMigrate Op = "migrate"
+	// OpRegKey is a registry key Apply created, at Path. Undo: remove it if
+	// it is empty.
+	OpRegKey Op = "reg_key"
+	// OpRegValue is a value Apply wrote in the registry key Path. Undo:
+	// write what Reg says was there, or remove the value.
+	OpRegValue Op = "reg_value"
+	// OpPath is a directory Apply added to the PATH value of the registry
+	// key Path. Undo: take that directory out, and leave the rest.
+	OpPath Op = "path"
 )
 
 // Entry is one change Apply made.
@@ -49,6 +58,8 @@ type Entry struct {
 	Service *ServiceEntry `json:"service,omitempty"`
 	Run     *RunEntry     `json:"run,omitempty"`
 	From    string        `json:"from,omitempty"`
+	// Reg is set on the registry entries (Windows).
+	Reg *RegEntry `json:"reg,omitempty"`
 }
 
 // Receipt is what an install leaves at <root>/.fynstall/receipt.json, and

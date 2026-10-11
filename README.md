@@ -15,7 +15,8 @@ delivered in phases; this README changes as each phase lands.
 Linux installers, per-user, with a wizard and a command line, launcher
 entries, icons, links on `PATH`, parameters and configuration files, and
 system-wide installs and upgrades. On Windows: per-user installs from the
-command line. The rest of Windows follows.
+command line, with a Start Menu shortcut, an entry in Settings > Apps and
+an entry on `PATH`. The wizard and system-wide installs on Windows follow.
 
 ## Using it
 
@@ -108,6 +109,16 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- Windows desktop integration, per-user (spec 001 phase 7b): the keys that
+  make a launcher entry, an icon and a link on Linux make a Start Menu
+  shortcut, an `.ico` and a `PATH` entry on Windows, and every install has
+  an entry in Settings > Apps that runs the installed `uninstall.exe`. The
+  receipt journals each registry key and value, and the uninstaller puts
+  the registry back. It takes its own entry out of `PATH` and leaves the
+  rest. No new config keys
+  ([#1](https://github.com/ushineko/fynstall/issues/1),
+  [#6](https://github.com/ushineko/fynstall/issues/6)).
+
 - Windows, per-user, from the command line (spec 001 phase 7a):
   `fynstall build --cli-only --target windows/amd64` builds an `.exe`
   installer and uninstaller, from Linux or from Windows. The install goes
@@ -115,8 +126,8 @@ MIT. See [LICENSE](LICENSE).
   uninstaller is `uninstall.exe`; it moves its own running file to the
   temporary directory, so the install directory is gone when it exits. The
   install lock is a named mutex. Upgrade, repair and downgrade work as on
-  Linux. Launcher entries, links, the wizard and system scope are not on
-  Windows yet. `examples/greet` builds for `windows/amd64`, and the tests
+  Linux. The wizard and system scope are not on Windows yet.
+  `examples/greet` builds for `windows/amd64`, and the tests
   run on Windows ([#1](https://github.com/ushineko/fynstall/issues/1)).
 
 - Launcher entries take `generic_name`, `keywords`, `startup_notify` and

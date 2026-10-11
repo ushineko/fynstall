@@ -129,9 +129,23 @@ func stage(c *config.Config, runtimeVersion, target string) (*manifest.Manifest,
 		return nil, nil, nil, err
 	}
 	var generated map[string][]byte
-	if c.App.Icon != "" {
+	switch icon := filepath.Join(c.Dir, filepath.FromSlash(c.App.Icon)); {
+	case c.App.Icon == "":
+	case strings.HasPrefix(target, "windows/"):
+		// Windows takes one .ico file, not a theme of PNGs. It is installed
+		// as a file of the install directory, so it is checked, journalled
+		// and removed like the rest of the payload.
+		b, err := ico(icon)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		sum := sha256.Sum256(b)
+		m.Files = append(m.Files, manifest.File{Path: manifest.WindowsIcon, Size: int64(len(b)), SHA256: hex.EncodeToString(sum[:]), Mode: 0o644})
+		sort.Slice(m.Files, func(i, j int) bool { return m.Files[i].Path < m.Files[j].Path })
+		generated = map[string][]byte{manifest.WindowsIcon: b}
+	default:
 		var err error
-		if m.Icons, generated, err = icons(filepath.Join(c.Dir, filepath.FromSlash(c.App.Icon))); err != nil {
+		if m.Icons, generated, err = icons(icon); err != nil {
 			return nil, nil, nil, err
 		}
 	}

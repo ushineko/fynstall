@@ -138,6 +138,11 @@ type Icon struct {
 	SHA256 string `json:"sha256"`
 }
 
+// WindowsIcon is the app icon as an .ico file, which a Windows installer
+// carries as a payload file of its own making. The installer puts it in
+// the install directory, and shortcuts and Settings > Apps show it.
+const WindowsIcon = ".fynstall/app.ico"
+
 // Path is the icon's path in the embedded payload.
 func (i Icon) Path() string { return fmt.Sprintf("%s/%d.png", IconDir, i.Size) }
 

@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 )
 
-// HasDesktopIntegration is false: the Start Menu shortcut and the PATH entry
-// that launcher entries and links become on Windows (spec 002 L10) come with
-// the registry journal, later in spec 001 phase 7.
-const HasDesktopIntegration = false
+// Integration is the Windows shell's: a launcher entry is a Start Menu
+// shortcut, a link is an entry on PATH, and every install has an Uninstall
+// registry entry (spec 001 R18, spec 002 L8 and L10).
+const Integration = WindowsShell
 
 func vars(scope string, env func(string) string) (map[string]string, error) {
 	switch scope {
@@ -23,11 +23,14 @@ func vars(scope string, env func(string) string) (map[string]string, error) {
 		// is no {bin}: Windows has no directory of links, and a link becomes
 		// a PATH entry instead (spec 002 L10).
 		data := absOr(env, "LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+		roaming := absOr(env, "APPDATA", filepath.Join(home, "AppData", "Roaming"))
 		return map[string]string{
 			"home":   home,
 			"data":   data,
-			"config": absOr(env, "APPDATA", filepath.Join(home, "AppData", "Roaming")),
+			"config": roaming,
 			keyScope: scope, keyIndex: filepath.Join(data, "fynstall", "installs"),
+			keyStartMenu: filepath.Join(roaming, "Microsoft", "Windows", "Start Menu", "Programs"),
+			keyRegRoot:   RegistryRoot(env),
 		}, nil
 	case "system":
 		return nil, fmt.Errorf("an install for everyone on this computer (system scope) on Windows: %w", ErrScopeUnavailable)
