@@ -470,8 +470,10 @@ where it goes.
   files before they are embedded. Secrets come from the environment, never
   from the config. Phase 7.
 - **L7 Version resource and manifest.** Windows `VERSIONINFO` and an
-  application manifest that requests elevation for system-only installers,
-  derived from `app` and `install.scopes`. No config keys. Phase 7.
+  application manifest, derived from `app`. No config keys. Phase 7. The
+  manifest does not request elevation, even for a system-only installer:
+  the helper asks for it, so the window never runs elevated (changed
+  2026-10-10, spec 001 phase 7d).
 - **L8 Uninstall registry fields.** `DisplayName`, `DisplayVersion`,
   `Publisher`, `InstallLocation`, `DisplayIcon`, `EstimatedSize`,
   `UninstallString`, `QuietUninstallString`, `NoModify` and `NoRepair`,

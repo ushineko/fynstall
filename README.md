@@ -110,6 +110,14 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- The version and the manifest of a Windows installer (spec 001 phase 7d,
+  spec 002 L7): an installer and an uninstaller for Windows carry a version
+  resource made from `app` (name, version, publisher), which Properties >
+  Details shows, and an application manifest that runs them with the rights
+  of whoever starts them. No config keys
+  ([#1](https://github.com/ushineko/fynstall/issues/1),
+  [#6](https://github.com/ushineko/fynstall/issues/6)).
+
 - System scope on Windows (spec 001 phase 7c): an install for everyone on
   the computer goes in `%ProgramFiles%\<id>`, with its record in
   `%ProgramData%`, its Settings > Apps entry under `HKLM`, its shortcut in
