@@ -112,6 +112,16 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
+### Unreleased
+
+- A failed uninstall can be finished (spec 004): an uninstall that cannot
+  remove a file keeps the receipt, the index entry and the uninstaller, and
+  removes them last, so the uninstaller or a repair can be run again. On
+  Windows the uninstaller tries a file that another program has open again
+  for about 5 seconds. `--force-receipt-uninstall` also removes an install
+  that an older uninstaller left without its index entry
+  ([#33](https://github.com/ushineko/fynstall/issues/33)).
+
 ### 0.1.0 (2026-10-10)
 
 - Fixes from the Windows desk checks (spec 001 phase 7): Uninstall in

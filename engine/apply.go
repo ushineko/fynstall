@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/ushineko/fynstall/manifest"
 	"github.com/ushineko/fynstall/platform"
@@ -257,6 +258,10 @@ type journal struct {
 	report  Reporter
 	// counts is how far the copying is, for Progress events.
 	counts Counts
+	// last are the paths undoFiles leaves until every other entry is undone.
+	last []string
+	// retry is how long removals have waited for files that were in use.
+	retry time.Duration
 }
 
 func (j *journal) progress(item string) {
@@ -366,36 +371,52 @@ func (j *journal) undo(keep []string) error {
 // undoes the actions, which come after the files and so go first.
 // Problems are collected, not fatal, so one stuck file does not leave the
 // rest.
+//
+// The paths in j.last are undone only when everything else was: they are
+// what a second run needs to find the install and finish it (spec 004).
 func (j *journal) undoFiles(keep []string) error {
 	var errs []error
-	for i := len(j.entries) - 1; i >= 0; i-- {
-		e := j.entries[i]
-		if e.Op == OpMkdir || kept(e.Path, keep) {
-			continue
-		}
-		var err error
-		switch e.Op {
-		case OpCreate:
-			err = removeCreated(e.Path)
-			if errors.Is(err, fs.ErrNotExist) {
-				err = nil
+	for _, last := range []bool{false, true} {
+		for i := len(j.entries) - 1; i >= 0; i-- {
+			e := j.entries[i]
+			if e.Op == OpMkdir || kept(e.Path, keep) || slices.Contains(j.last, e.Path) != last {
+				continue
 			}
-			j.report.emit(Detail, "removed %s", e.Path)
-		case OpReplace:
-			err = j.restore(e)
-			j.report.emit(Detail, "restored %s", e.Path)
-		case OpRegKey, OpRegValue, OpPath:
-			err = j.undoRegistry(e)
-		default:
-			err = j.undoAction(e)
+			if err := j.undoEntry(e); err != nil {
+				errs = append(errs, err)
+			}
 		}
-		if err != nil {
-			errs = append(errs, err)
+		// Directories stay until every file is dealt with, so a second run
+		// still finds the receipt.
+		if len(errs) > 0 {
+			break
 		}
 	}
-	// Directories stay until every file is dealt with, so a second run
-	// still finds the receipt.
 	return errors.Join(errs...)
+}
+
+// undoEntry reverses one entry that is not a directory.
+func (j *journal) undoEntry(e Entry) error {
+	switch e.Op {
+	case OpCreate:
+		err := removeCreated(e.Path, &j.retry)
+		switch {
+		case err == nil:
+			j.report.emit(Detail, "removed %s", e.Path)
+		case !errors.Is(err, fs.ErrNotExist):
+			return err
+		}
+		return nil
+	case OpReplace:
+		if err := j.restore(e); err != nil {
+			return err
+		}
+		j.report.emit(Detail, "restored %s", e.Path)
+		return nil
+	case OpRegKey, OpRegValue, OpPath:
+		return j.undoRegistry(e)
+	}
+	return j.undoAction(e)
 }
 
 // removeDirs removes the directories the journal created that are empty,

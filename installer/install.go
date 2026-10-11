@@ -100,6 +100,8 @@ func Install(args []string, p Payload, e Env) int {
 		return forceUninstall(ix, e, f.verbose)
 	case ix != nil && f.uninstall:
 		return delegate(ix, f.yes, e)
+	case ix == nil && f.forceReceipt && findUnindexed(m, f.scope, e.Getenv) != nil:
+		return forceUninstall(findUnindexed(m, f.scope, e.Getenv), e, f.verbose)
 	case ix == nil && (f.uninstall || f.forceReceipt):
 		_, _ = fmt.Fprintf(e.Err, "%s is not installed.\n", m.App.Name)
 		return exitFail

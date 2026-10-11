@@ -41,10 +41,12 @@ const (
 // did not create them; RemoveLeftovers deletes them when a person says so.
 //
 // It can be run again after a failure: a file already removed or restored
-// is skipped, and the receipt stays until every file is dealt with.
+// is skipped. The receipt, the index entry and the uninstaller stay until
+// everything else is dealt with, so the install can still be found and
+// removed (spec 004).
 func Uninstall(r *Receipt, why Reason, report Reporter) ([]Leftover, error) {
 	env := []string{"FYNSTALL_UNINSTALL_REASON=" + string(why)}
-	j := &journal{root: r.Root, entries: r.Journal, report: report, env: env}
+	j := &journal{root: r.Root, entries: r.Journal, report: report, env: env, last: []string{r.Index, r.Uninstaller}}
 	if len(r.Hooks) > 0 {
 		report.emit(Step, "Running the uninstall hooks of %s", r.App.Name)
 		if err := runHooks(r.Hooks, env, report); err != nil {
