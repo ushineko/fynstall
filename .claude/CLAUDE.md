@@ -53,7 +53,11 @@ is enforced by a test, the test is named.
   additive or versioned; never break a receipt an older uninstaller wrote.
 - **No GUI as root.** System scope runs only the apply step in a privileged
   helper (`pkexec` or `sudo` on Linux, UAC on Windows). The Fyne process
-  always runs as the user.
+  runs as the user. One exception, on Windows only: the uninstaller's
+  window opens when the uninstaller is started as an administrator, because
+  Settings > Apps starts it that way for an install for everyone. The
+  installer's wizard has no such exception, and that window shows no link
+  and opens no file dialog; keep it so.
 - **Nothing outside the plan's roots.** A destination that resolves outside
   its root (`..`, an absolute `dst`, a symlink escape) is refused by
   `validate` and again by `Apply`. Payload content is never run during an

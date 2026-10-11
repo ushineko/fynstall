@@ -110,6 +110,14 @@ MIT. See [LICENSE](LICENSE).
 
 ### Unreleased
 
+- Fixes from the Windows desk checks (spec 001 phase 7): Uninstall in
+  Settings > Apps now removes an install for everyone. Settings starts the
+  uninstaller as an administrator, and its window refused to open; on
+  Windows that one window now opens with an administrator's rights. The
+  wizard and the uninstaller's window show the app's icon on Windows.
+  `make hello` builds a program with a window on Windows, so no console
+  opens beside it ([#1](https://github.com/ushineko/fynstall/issues/1)).
+
 - NSIS-compatible switches (spec 002 L1): with `cli: { compat: nsis }` an
   installer also takes `/S`, `/D=<directory>` and `/<Name>=<value>` for each
   parameter, and turns each into its own flag, so what ran a program's NSIS

@@ -25,6 +25,11 @@ type modeInput struct {
 	// root is true when the process runs as root, or elevated on Windows,
 	// which the window never does (spec 001 R13).
 	root bool
+	// rootWindow lifts that rule: the uninstaller on Windows, which
+	// Settings > Apps starts as an administrator for an install for
+	// everyone, and whose window must then open or nothing is seen to
+	// happen.
+	rootWindow bool
 }
 
 /*
@@ -44,13 +49,13 @@ func chooseMode(in modeInput) (mode, error) {
 		return modeCLI, errors.New("--gui and --cli ask for different things; give one")
 	case in.wantGUI && !in.available:
 		return modeCLI, errors.New("this installer was built without the wizard (--cli-only); run it without --gui")
-	case in.wantGUI && in.root:
+	case in.wantGUI && in.root && !in.rootWindow:
 		return modeCLI, errors.New(msgNoWindowAsAdmin)
 	case in.wantGUI && !in.display:
 		return modeCLI, errors.New(msgNoDisplay)
 	case in.wantGUI:
 		return modeGUI, nil
-	case in.wantCLI, !in.available, in.cliOnly, in.interactive, !in.display, in.root:
+	case in.wantCLI, !in.available, in.cliOnly, in.interactive, !in.display, in.root && !in.rootWindow:
 		return modeCLI, nil
 	}
 	return modeGUI, nil

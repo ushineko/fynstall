@@ -65,7 +65,7 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 	// The CLI never asks: running the uninstaller is the decision (spec 001
 	// phase 4). --yes is accepted for scripts and the installer's
 	// --uninstall; in the window it skips the question.
-	md, err := e.modeFor(modeInput{wantGUI: gui, wantCLI: cli, cliOnly: quiet || *upgrade})
+	md, err := e.modeFor(modeInput{wantGUI: gui, wantCLI: cli, cliOnly: quiet || *upgrade, rootWindow: uninstallWindowAsAdmin})
 	if err != nil {
 		_, _ = fmt.Fprintln(e.Err, err)
 		return exitUsage

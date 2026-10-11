@@ -23,6 +23,11 @@ func ownConsole() bool { return false }
 // releaseConsole does nothing here.
 func releaseConsole() {}
 
+// uninstallWindowAsAdmin is false: nothing here starts an uninstaller as
+// root with a window to show, and a window as root often cannot open at all
+// (see the Windows file).
+const uninstallWindowAsAdmin = false
+
 // privileged reports whether the process runs as root, which the window
 // never does (spec 001 R13).
 func privileged() bool { return os.Geteuid() == 0 }
