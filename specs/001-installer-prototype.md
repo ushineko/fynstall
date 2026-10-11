@@ -1307,6 +1307,34 @@ Desk check, in the user's real home directory:
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
 
+### Phases 7a to 7d on Linux (2026-10-10)
+
+The Linux run that the entries below ask for, of the whole of phase 7 at
+once: the top of the stack (`a04be26`, which holds 7a to 7d), on CachyOS
+amd64 with Go 1.26.0, in a worktree of its own. A second session did the
+run and reported it; nothing below was seen from the Windows machine.
+
+- `go build ./...` and `go vet ./...` are clean, with the wizard's code,
+  which had not been compiled for Linux before.
+- `make test` (`go test -race ./...`) passes in all 10 packages. No test
+  is skipped in `builder`, `installer`, `engine` or `platform`.
+- `make lint` (golangci-lint v2.12.2) reports 0 issues, and `make vuln`
+  (`govulncheck`) no vulnerabilities. This is the first `govulncheck` run
+  of phase 7.
+- `make hello`, `make greet` and `make beacon` build. `make beacon` writes
+  `examples/beacon/bin/beacon`, with no suffix.
+
+By hand, with the CLI-only installer of `examples/hello` built from that
+commit, in a temporary `HOME`: the default install directory is
+`~/.local/share/io.ushineko.hello`, as before `{programs}`; an argument
+that is not a flag is refused with its message; the uninstall left the home
+empty.
+
+So what the entries below say has not run on Linux has now run there, and
+the sentences "nothing ran on Linux" in them are true of their date only.
+Not covered: a system install on Linux with a real `pkexec` prompt, and a
+desk check of the wizard, neither of which phase 7 was meant to change.
+
 ### Phase 7d (2026-10-10)
 
 Same machine as 7a to 7c, from an elevated console. After each of the three
