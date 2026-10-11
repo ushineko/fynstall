@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"debug/pe"
 	"encoding/binary"
+	"encoding/xml"
 	"image"
 	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/ushineko/fynstall/manifest"
 )
 
 // ReadResources returns the resources in the .rsrc section of the PE file
@@ -132,4 +136,121 @@ func TestTheIconResourcesAreOneSectionTheLinkerCanPlace(t *testing.T) {
 	require.ErrorContains(t, err, "not an .ico file")
 	_, err = iconResources(b[:40])
 	require.ErrorContains(t, err, "not an .ico file")
+}
+
+// ReadVersion reads a version resource as Windows lays it out: the four
+// numbers of the file's version, the flags, and the strings by name.
+func ReadVersion(t *testing.T, b []byte) (numbers [4]uint16, flags uint32, strs map[string]string) {
+	t.Helper()
+	le := binary.LittleEndian
+	text := func(b []byte) (string, int) {
+		var u []uint16
+		for i := 0; ; i += 2 {
+			if c := le.Uint16(b[i:]); c != 0 {
+				u = append(u, c)
+				continue
+			}
+			return string(utf16.Decode(u)), i + 2
+		}
+	}
+	strs = map[string]string{}
+	// walk reads the node at the start of b and the nodes inside it.
+	var walk func(b []byte, depth int)
+	walk = func(b []byte, depth int) {
+		length, valueLen, kind := int(le.Uint16(b)), int(le.Uint16(b[2:])), le.Uint16(b[4:])
+		key, n := text(b[6:])
+		at := (6 + n + 3) &^ 3
+		if kind == 1 {
+			valueLen *= 2
+		}
+		switch {
+		case key == "VS_VERSION_INFO":
+			require.Equal(t, 52, valueLen)
+			fixed := b[at:]
+			require.Equal(t, uint32(0xfeef04bd), le.Uint32(fixed))
+			ms, ls := le.Uint32(fixed[8:]), le.Uint32(fixed[12:])
+			require.Equal(t, [2]uint32{ms, ls}, [2]uint32{le.Uint32(fixed[16:]), le.Uint32(fixed[20:])}, "the product's version is the file's")
+			numbers = [4]uint16{uint16(ms >> 16), uint16(ms), uint16(ls >> 16), uint16(ls)}
+			flags = le.Uint32(fixed[28:])
+		case key == "Translation":
+			require.Equal(t, []byte{0x09, 0x04, 0xb0, 0x04}, b[at:at+4], "US English, Unicode")
+		case depth == 3:
+			v, _ := text(b[at:])
+			require.Equal(t, len(utf16.Encode([]rune(v)))+1, valueLen/2, "%s: the length counts the characters and the zero", key)
+			strs[key] = v
+			return
+		case depth == 2 && key != "Translation":
+			require.Equal(t, "040904b0", key, "the table is named for its language")
+		}
+		for at = (at + valueLen + 3) &^ 3; at < length; {
+			walk(b[at:], depth+1)
+			at = (at + int(le.Uint16(b[at:])) + 3) &^ 3
+		}
+	}
+	walk(b, 0)
+	require.Equal(t, int(le.Uint16(b)), len(b), "the first node is the whole resource")
+	return numbers, flags, strs
+}
+
+// The version resource and the manifest come from the app block alone
+// (spec 002 L7).
+func TestAProgramSaysWhatItIsAndAsksForNoMoreRights(t *testing.T) {
+	app := manifest.App{ID: "io.example.shell", Name: "Shell Example", Version: "1.2.3-rc.1+build5", Publisher: "Example Makers & Sons"}
+	ico := testIco(t)
+	res, err := exeResources("windows", "amd64", app, ico, "installer", "shell-installer.exe")
+	require.NoError(t, err)
+	p := filepath.Join(t.TempDir(), sysoName("amd64"))
+	require.NoError(t, os.WriteFile(p, res[sysoName("amd64")], 0o600))
+	got := ReadResources(t, p)
+
+	numbers, flags, strs := ReadVersion(t, got[[2]uint16{resVersion, 1}])
+	require.Equal(t, [4]uint16{1, 2, 3, 0}, numbers)
+	require.Equal(t, uint32(2), flags, "a version with a prerelease part says so")
+	require.Equal(t, map[string]string{
+		"CompanyName": "Example Makers & Sons", "FileDescription": "Shell Example installer",
+		"FileVersion": "1.2.3-rc.1+build5", "ProductVersion": "1.2.3-rc.1+build5",
+		"ProductName": "Shell Example", "OriginalFilename": "shell-installer.exe",
+	}, strs)
+
+	var m struct {
+		Identity struct {
+			Name    string `xml:"name,attr"`
+			Version string `xml:"version,attr"`
+		} `xml:"assemblyIdentity"`
+		Run struct {
+			Level string `xml:"level,attr"`
+		} `xml:"trustInfo>security>requestedPrivileges>requestedExecutionLevel"`
+	}
+	require.NoError(t, xml.Unmarshal(got[[2]uint16{resManifest, 1}], &m))
+	require.Equal(t, "io.example.shell.installer", m.Identity.Name)
+	require.Equal(t, "1.2.3.0", m.Identity.Version)
+	require.Equal(t, "asInvoker", m.Run.Level, "the helper asks for an administrator, never the program itself")
+	RequireIcon(t, ico, got)
+
+	// No publisher and no icon: the string and the images are left out.
+	app.Publisher, app.Version = "", "70000.2.3"
+	plain := versionResource(app, "uninstaller", "u.exe")
+	numbers, flags, strs = ReadVersion(t, plain)
+	require.Equal(t, [4]uint16{0xffff, 2, 3, 0}, numbers, "a number too large for Windows is its largest")
+	require.Zero(t, flags)
+	require.NotContains(t, strs, "CompanyName")
+	require.Equal(t, "70000.2.3", strs["FileVersion"], "the strings hold the version as written")
+
+	res, err = exeResources("linux", "amd64", app, nil, "installer", "x")
+	require.NoError(t, err)
+	require.Empty(t, res, "only a Windows program has resources")
+}
+
+// RequireAsInvoker checks that the resources of a file hold one manifest,
+// and that it asks for the rights of whoever starts the program.
+func RequireAsInvoker(t *testing.T, got map[[2]uint16][]byte) {
+	t.Helper()
+	n := 0
+	for k := range got {
+		if k[0] == resManifest {
+			n++
+		}
+	}
+	require.Equal(t, 1, n, "one manifest")
+	require.Contains(t, string(got[[2]uint16{resManifest, 1}]), `level="asInvoker"`)
 }

@@ -688,3 +688,31 @@ func TestARepairLeavesOneSetOfRegistryEntries(t *testing.T) {
 	require.Equal(t, 0, code, out)
 	require.Equal(t, before, h.snap(t))
 }
+
+// Windows reads back what the builder wrote into each program: the version
+// in Properties > Details, and a manifest that asks for no more rights
+// (spec 002 L7). The C linker of a full build carries both as the Go linker
+// does.
+func TestWindowsReadsTheVersionOfTheInstallerAndTheUninstaller(t *testing.T) {
+	require.NoError(t, setupFail)
+	ps, err := exec.LookPath("powershell.exe")
+	if err != nil {
+		t.Skip("powershell.exe is not on PATH")
+	}
+	progs := map[string]string{shell.Installer: "installer", shell.Uninstaller: "uninstaller"}
+	if shellFull.Installer != "" {
+		progs[shellFull.Installer], progs[shellFull.Uninstaller] = "installer", "uninstaller"
+	}
+	for p, kind := range progs {
+		builder.RequireAsInvoker(t, builder.ReadResources(t, p))
+		script := `$v = (Get-Item -LiteralPath $env:EXE).VersionInfo; ` +
+			`"$($v.FileMajorPart).$($v.FileMinorPart).$($v.FileBuildPart).$($v.FilePrivatePart)|$($v.FileVersion)|$($v.ProductVersion)|` +
+			`$($v.ProductName)|$($v.CompanyName)|$($v.FileDescription)|$($v.OriginalFilename)|$($v.IsPreRelease)"`
+		cmd := exec.CommandContext(t.Context(), ps, "-NoProfile", "-NonInteractive", "-Command", script)
+		cmd.Env = append(os.Environ(), "EXE="+p)
+		got, err := cmd.Output()
+		require.NoError(t, err)
+		require.Equal(t, "1.2.3.0|1.2.3|1.2.3|Shell Example|Example Makers|Shell Example "+kind+"|"+filepath.Base(p)+"|False",
+			strings.TrimSpace(string(got)), p)
+	}
+}

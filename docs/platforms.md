@@ -180,6 +180,13 @@ Windows expects for each.
   `app` and the install: name, version, publisher, location, icon, size,
   and the commands that run the installed `uninstall.exe`. No config key
   sets them.
+- **Every installer and uninstaller** says what it is in Properties >
+  Details: the program's name, version and publisher, from `app`. A version
+  with a prerelease part is marked as a prerelease. Each also carries an
+  application manifest that asks for the rights of whoever starts it; a
+  system install gets an administrator through its helper, as above, and
+  the manifest never asks for one. The build writes both as resources, with
+  no other tool and no config key.
 
 The plan lists the shortcut, the registry key and the `PATH` entry before
 the install starts, and `--dry-run` prints them.

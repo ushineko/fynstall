@@ -907,9 +907,42 @@ Phase 7c, second part:
       Nothing here could make that case: it needs a process that is not
       elevated to start one that is.
 
+Phase 7d comes in parts, one PR each, as 7c did.
+
+Chosen for 7d, the version resource and the manifest (2026-10-10), for the
+maintainer to confirm in the PR. Neither the config format nor the receipt
+changes.
+
+- The version resource holds the app's version as four numbers (X, Y, Z
+  and 0) and as written, the name, the publisher, "<name> installer" or
+  "<name> uninstaller", and the file's name in `dist`. A number above 65535
+  is stored as 65535, which is all Windows keeps; the strings hold the
+  version as written.
+- The manifest says `asInvoker` for every installer, including one whose
+  config offers only system scope. Spec 002 L7 says such an installer asks
+  for elevation in its manifest. It cannot: an installer that Windows
+  elevates has no window (R13, "no GUI as root"), so a double-click on a
+  system-only installer would give a command line that asks nothing. The
+  helper asks for the administrator instead, as in 7c. L7 is changed to
+  match.
+- The manifest names Windows 10 and 11 as known, so Windows reports its
+  real version to the program, which the prerequisites check (L2) reads.
+- It says nothing about DPI or long paths. The window's library sets its
+  own DPI mode, and Go opens long paths without the setting.
+
+Phase 7d, the version resource and the manifest:
+
+- [x] An installer and an uninstaller for Windows carry a version resource
+      and a manifest, made from `app`, beside the icon; a program for
+      another OS carries none
+      (`TestAProgramSaysWhatItIsAndAsksForNoMoreRights`).
+- [x] Windows reads the version, the names and the prerelease mark back
+      from the CLI-only and the full programs, and each has one manifest
+      (`TestWindowsReadsTheVersionOfTheInstallerAndTheUninstaller`).
+- [x] Builds stay reproducible (`TestBuildsAreReproducible`).
+
 The whole of phase 7:
 
-A
 - [ ] `fynstall build --target windows/amd64` from Linux produces an `.exe`
       with the icon embedded as a resource.
 - [ ] Desk check in the win11-kvm VM. Double-click opens the wizard with no
