@@ -150,11 +150,22 @@ started it:
 - **Over SSH or as a service** there is no desktop, and the installer runs
   on the command line and asks nothing.
 - **As an administrator** (an elevated console, or "Run as administrator")
-  the installer runs on the command line, and `--gui` is refused: the window
-  does not run with an administrator's rights.
+  the installer runs on the command line, and `--gui` is refused: the
+  installer's window does not run with an administrator's rights.
 
-The uninstaller chooses the same way. The Uninstall button in Settings >
-Apps opens its window, which asks once.
+The uninstaller chooses the same way, with one difference. The Uninstall
+button in Settings > Apps opens its window, which asks once. For an install
+for everyone, Settings starts the uninstaller as an administrator, after
+its own UAC prompt, and the uninstaller's window opens all the same: it is
+the one window of fynstall that runs with an administrator's rights. It
+then removes the install itself, with no helper and no second prompt. From
+an administrator's console the uninstaller still runs on the command line.
+
+A program with a window must be built as one, or Windows opens a console
+beside its window however it is started: from the finish page, from its
+shortcut or from Explorer. In Go that is `-ldflags -H=windowsgui`, which
+`make hello` uses on Windows. It is the program's build, not the
+installer's.
 
 A problem found before the wizard can open is shown in a small window, as a
 program started from the desktop has no console to print it on.

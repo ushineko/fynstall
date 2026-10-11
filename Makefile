@@ -92,9 +92,13 @@ build: ## Build the fynstall builder into bin/
 
 # The example program every test and desk check installs. Needs cgo and the
 # graphics headers, as any Fyne window does.
+# On Windows a program is a console program unless its build says it has a
+# window, and Windows opens a console beside the window of one that does not.
+HELLO_LDFLAGS := $(if $(filter windows,$(shell go env GOOS)),-ldflags -H=windowsgui)
+
 .PHONY: hello
 hello: ## Build examples/hello into examples/hello/bin/, where its fynstall.yaml looks
-	go build $(GOFLAGS) -o examples/hello/bin/hello$(shell go env GOEXE) ./examples/hello
+	go build $(GOFLAGS) $(HELLO_LDFLAGS) -o examples/hello/bin/hello$(shell go env GOEXE) ./examples/hello
 
 # The multi-target example, for every target its fynstall.yaml can name.
 # Pure Go, so one machine builds them all.

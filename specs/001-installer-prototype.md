@@ -658,10 +658,10 @@ Phase 7a:
       per-user (`TestSystemScopeIsRefusedAndPerUserStillInstalls`).
 - [x] `go test ./...` passes on Windows. Tests of Linux behaviour (launcher
       entries, systemd, `pkexec`, the wizard) are built for Linux only.
-- [ ] Desk check on Windows 11, in a console: the installer asks its
+- [x] Desk check on Windows 11, in a console: the installer asks its
       questions and reads a secret without showing it; `--dry-run` lists the
       plan; the uninstaller, run from another directory, leaves no install
-      directory.
+      directory. (2026-10-10: see Verification, "Desk checks".)
 
 Chosen for 7b (2026-10-10), for the maintainer to confirm in the PR. The
 config format does not change. The receipt gains three journal operations
@@ -773,12 +773,14 @@ Phase 7b:
       compile and have not run).
 - [x] `examples/hello`, unchanged, builds a CLI-only Windows installer on
       Windows. The full installer waits for the wizard (7c).
-- [ ] Desk check on Windows 11, in the real profile: the program is in
+- [x] Desk check on Windows 11, in the real profile: the program is in
       Start with its icon and starts from there; it is in Settings > Apps
       with its name, version, publisher, size and icon, and Uninstall there
       removes it; a new console finds the program by name; `reg export` of
       `HKCU\Environment` and of the Uninstall key before the install and
-      after the uninstall are identical (`fc`).
+      after the uninstall are identical (`fc`). (The phase 7b entry of
+      Verification has all but Uninstall from Settings > Apps, which the
+      "Desk checks" entry has.)
 
 Phase 7c comes in two parts: the wizard and mode selection (this part),
 then the helper under UAC with system scope.
@@ -838,7 +840,10 @@ Phase 7c, first part:
       the uninstaller's window and removes the program; from `cmd` and
       PowerShell the installer runs on the command line and asks its
       questions; an elevated console gets the command line and a refusal of
-      `--gui`.
+      `--gui`. (2026-10-10: all of it but one part is in Verification,
+      "Desk checks" and "Phase 7c, first part". Still to do: the full
+      installer typed into `cmd` and into PowerShell, not elevated. The
+      CLI-only installer was run that way.)
 
 Chosen for the second part of 7c (2026-10-10). The maintainer agreed the
 first three before the work started; the rest are for the PR. Neither the
@@ -902,7 +907,11 @@ Phase 7c, second part:
       Settings > Apps; closing the prompt changes nothing and says so; the
       uninstaller shows one prompt and leaves `HKLM` and the folders as
       they were (`reg export` and `fc`); the wizard does the same with
-      "Everyone on this computer".
+      "Everyone on this computer". (2026-10-10: done, in Verification,
+      "Desk checks", but for two parts. No second user looked at Start.
+      And no `reg export` was taken before, so what was checked afterwards
+      is that the install's own keys, `PATH` entry, folders and shortcut
+      were gone, not that the exports are identical.)
 - [ ] A helper started through a real prompt ignores the test variables.
       Nothing here could make that case: it needs a process that is not
       elevated to start one that is.
@@ -999,13 +1008,15 @@ Phase 7d, services:
       program's file can be deleted
       (`TestTheRealServiceManagerRunsAServiceAndRemovesIt`, run by hand: see
       Verification).
-- [ ] Desk check on Windows 11, from a console that is not elevated:
+- [x] Desk check on Windows 11, from a console that is not elevated:
       `make beacon`, `fynstall build --cli-only` in `examples/beacon`, and
       the installer with `--scope system`. One UAC prompt; `sc query beacon`
       says RUNNING and Services shows "Beacon, the fynstall example
       service" with its recovery actions; the uninstaller shows one prompt,
       and afterwards `sc query beacon` finds no service and the install
-      directory is gone.
+      directory is gone. (2026-10-10: see Verification, "Desk checks". The
+      service's settings were read with commands, not in the Services
+      window.)
 - [x] A repair of an install with a service removes the old service
       through the installed uninstaller before it registers the new one
       (`TestAServiceIsRegisteredForEveryoneAndRemovedBeforeItsProgram`,
@@ -1145,6 +1156,41 @@ need a decision first.
 - [x] Payload symlinks become copies on a Windows target (spec 002 D4a,
       done in the builder): a desk check installs a payload that has links
       and runs the copied files. (2026-10-10: see Verification, phase 7d.)
+
+Found by the desk checks of 2026-10-10, and fixed after them. The first
+changes an architecture rule, on the maintainer's decision.
+
+- **Uninstall in Settings > Apps did nothing for an install for
+  everyone.** Settings starts the uninstaller of such an install as an
+  administrator, with the `--gui` its registry entry names, and the
+  uninstaller refused to open a window as one. Its message went to a
+  console that closed at once. Decided: on Windows the uninstaller's window
+  opens when it is started as an administrator, and it then removes the
+  install itself, with no helper. The installer's wizard keeps the rule,
+  and so does every window on Linux. Considered and not chosen: the
+  elevated process as the helper of a copy of itself that it starts
+  without its rights, which keeps the rule and is a good deal more to
+  build and to get wrong; and an uninstall with no window. The rule in
+  `.claude/CLAUDE.md` says the exception.
+- **The wizard's window had no icon on Windows.** It looked for the
+  hicolor PNGs, and a Windows installer carries one `.ico`. The window now
+  takes the PNG inside the `.ico`, and the uninstaller's window takes it
+  from the install directory.
+- **`examples/hello` opened with a console.** `make hello` built a console
+  program. It now builds a program with a window on Windows
+  (`-H=windowsgui`), and `docs/platforms.md` says that this is the
+  program's build to get right.
+
+- [x] The uninstaller on Windows opens its window as an administrator when
+      asked to or when started from the desktop, and still uses the command
+      line in an administrator's console or with `--quiet`; the installer
+      refuses as before (`TestChooseMode`).
+- [x] A window takes the largest PNG of an icon file
+      (`TestTheWindowTakesThePNGOfAnIconFile`).
+- [x] Desk check on Windows 11: Uninstall in Settings > Apps removes an
+      install for everyone through the uninstaller's window; the wizard and
+      that window show the app's icon; Hello starts from the finish page
+      with no console. (2026-10-10: see Verification, "Desk checks".)
 
 Open after 7d. None of these is started.
 
@@ -1306,6 +1352,73 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Desk checks of phase 7 on Windows (2026-10-10)
+
+Windows 11 Pro, in the maintainer's own account, from a PowerShell console
+that is not elevated, and from Explorer and Settings. The installers were
+built from `main` after phase 7d merged; the last check used a build with
+the three fixes it led to. The maintainer ran each step and said what
+happened; the state afterwards was read from an elevated console.
+
+Passed:
+
+- **The command line (7a).** The CLI-only installer of `examples/greet`
+  asked for its parameters, the directory and its confirmation. The access
+  token did not show as it was typed. The installed `uninstall.exe`, run
+  from another directory, said "Removed Greet" and left no install
+  directory.
+- **The wizard, for one user (7b, 7c).** A double-click on the full
+  installer of `examples/hello` opened the wizard; a console window showed
+  for a moment and closed. No page had text cut off or missing. The finish
+  page started Hello. Hello was in Start with its icon. Uninstall in
+  Settings > Apps opened the uninstaller's window, which removed it.
+- **For everyone (7c).** `--scope system --yes` with the UAC prompt
+  refused: "an administrator did not allow it", and no directory in
+  `%ProgramFiles%`. The same with the prompt accepted: one prompt, the
+  helper's steps printed as the installer's own, and the install in
+  `%ProgramFiles%\io.ushineko.hello`. The uninstaller: one prompt, "Removed
+  Hello", and the directory gone. The wizard with "Everyone on this
+  computer" installed too.
+- **A service (7d).** The CLI-only installer of `examples/beacon` with
+  `--scope system`: the service `beacon` was running, with the display name
+  of the config, start type Auto, account LocalSystem, and three restarts
+  as its recovery actions (`Get-CimInstance Win32_Service`, `sc qfailure`).
+  The installer run again said "Repairs Beacon 0.1.0", showed one prompt
+  and left the service running. The uninstaller said "Removed Beacon";
+  afterwards there was no service, no install directory and no
+  `%ProgramData%\beacon`.
+
+Failed, and fixed (see "Found by the desk checks" in the phase list):
+
+- The wizard's window had no icon, though the installer's file had one in
+  Explorer.
+- Hello, started from the finish page, opened a console that stayed.
+- For the install for everyone, Uninstall in Settings > Apps showed a
+  window for a moment and removed nothing. Run by hand from an elevated
+  process, the installed uninstaller with `--gui` exited 2 with "the window
+  does not run as an administrator".
+
+With the fixes built, the maintainer repeated the last check: the wizard
+for everyone, Hello started from the finish page, and Uninstall from
+Settings > Apps. All of it worked: the icon on both windows, no console
+beside Hello, and the install removed.
+
+Afterwards, read from the registry and the disk: no Uninstall key for
+Hello, Beacon or Greet under `HKCU` or `HKLM`; neither `PATH` names them;
+no `Services\beacon` key; no install directory, record or Start Menu
+shortcut of either scope. `%APPDATA%\io.ushineko.hello` is there, as
+`keep_on_uninstall` says it is.
+
+Not done:
+
+- No `reg export` was taken before the checks, so the comparison with
+  `fc` that the criteria name was not made for system scope.
+- No second user looked at Start.
+- The full installer was not typed into `cmd` or PowerShell.
+- A helper started through a real prompt with the test variables set.
+- Whether the uninstallers moved to `%TEMP%` are gone after a restart.
+- Properties > Details of an installer was not opened.
 
 ### Phases 7a to 7d on Linux (2026-10-10)
 

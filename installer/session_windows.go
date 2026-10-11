@@ -51,6 +51,13 @@ func ownConsole() bool { return platform.ConsoleProcesses() == 1 }
 // console window stays open behind the wizard.
 func releaseConsole() { _, _, _ = procFreeConsole.Call() }
 
+// uninstallWindowAsAdmin is true: Settings > Apps starts the uninstaller of
+// an install for everyone as an administrator, with --gui, and there is no
+// asking it not to. A window that refused to open there left the program
+// installed and showed nothing. The installer's wizard keeps the rule (R13):
+// it is started by a person, as that person.
+const uninstallWindowAsAdmin = true
+
 // privileged reports whether the process runs as an administrator with its
 // rights in force (elevated), which the window never does (R13).
 func privileged() bool { return windows.GetCurrentProcessToken().IsElevated() }

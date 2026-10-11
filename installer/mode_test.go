@@ -27,6 +27,10 @@ func TestChooseMode(t *testing.T) {
 		{"--gui as an administrator", with(func(i *modeInput) { i.display, i.wantGUI, i.root = true, true, true }), modeCLI, "the window does not run as"},
 		{"double-clicked as an administrator", with(func(i *modeInput) { i.display, i.root = true, true }), modeCLI, ""},
 		{"--gui as an administrator in a CLI-only build", modeInput{wantGUI: true, display: true, root: true}, modeCLI, "built without the wizard"},
+		{"the uninstaller on Windows, started by Settings as an administrator", with(func(i *modeInput) { i.display, i.wantGUI, i.root, i.rootWindow = true, true, true, true }), modeGUI, ""},
+		{"that uninstaller double-clicked as an administrator", with(func(i *modeInput) { i.display, i.root, i.rootWindow = true, true, true }), modeGUI, ""},
+		{"that uninstaller in an administrator's console", with(func(i *modeInput) { i.display, i.interactive, i.root, i.rootWindow = true, true, true, true }), modeCLI, ""},
+		{"that uninstaller with --quiet", with(func(i *modeInput) { i.display, i.cliOnly, i.root, i.rootWindow = true, true, true, true }), modeCLI, ""},
 		{"--gui and --cli", with(func(i *modeInput) { i.wantGUI, i.wantCLI = true, true }), modeCLI, "give one"},
 	}
 	for _, tc := range cases {

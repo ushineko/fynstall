@@ -559,10 +559,19 @@ func start(path string, ours bool, args ...string) {
 	}
 }
 
-// icon is the largest app icon in the payload, for the window.
+// icon is the largest app icon in the payload, for the window. A Windows
+// installer carries one .ico file and no PNGs, and the window takes the PNG
+// inside it.
 func icon(m *manifest.Manifest, files fs.FS) fyne.Resource {
-	if len(m.Icons) == 0 || files == nil {
+	if files == nil {
 		return nil
+	}
+	if len(m.Icons) == 0 {
+		b, err := fs.ReadFile(files, manifest.WindowsIcon)
+		if err != nil {
+			return nil
+		}
+		return pngResource(icoPNG(b))
 	}
 	ic := m.Icons[len(m.Icons)-1]
 	b, err := fs.ReadFile(files, ic.Path())
@@ -570,6 +579,25 @@ func icon(m *manifest.Manifest, files fs.FS) fyne.Resource {
 		return nil
 	}
 	return fyne.NewStaticResource(filepath.Base(ic.Path()), b)
+}
+
+// pngResource is b as a window icon, or nil when there is no image.
+func pngResource(b []byte) fyne.Resource {
+	if b == nil {
+		return nil
+	}
+	return fyne.NewStaticResource("icon.png", b)
+}
+
+// installedIcon is the icon of the install at root, for the uninstaller's
+// window: the .ico that a Windows install keeps in its directory. Elsewhere
+// there is none there, and the window has Fyne's icon as before.
+func installedIcon(root string) fyne.Resource {
+	b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(manifest.WindowsIcon))) // #nosec G304 -- a file of this install, named by fynstall
+	if err != nil {
+		return nil
+	}
+	return pngResource(icoPNG(b))
 }
 
 // notice shows text in a window of its own, for a problem found before any
@@ -644,6 +672,7 @@ func uninstallConfirm(r *engine.Receipt, skip bool, env func(string) string) (wi
 	return wizard.ConfirmOptions{
 		AppID:    r.App.ID + ".uninstaller",
 		Name:     "Uninstall " + r.App.Name,
+		Icon:     installedIcon(r.Root),
 		Question: fmt.Sprintf("Uninstall %s %s?", r.App.Name, r.App.Version),
 		Detail:   detail,
 		Action:   "Uninstall", Destructive: true,
