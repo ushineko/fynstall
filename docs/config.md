@@ -364,7 +364,8 @@ What the wizard shows.
 
 A list of `os/arch` pairs. Without it, and without `--target`, the build is
 for the machine that runs it. The known targets are `linux/amd64`,
-`linux/arm64` and `windows/amd64`. Windows builds come with spec 001 phase 7.
+`linux/arm64` and `windows/amd64`. A Windows target builds with `--cli-only`
+only; the wizard on Windows comes later in spec 001 phase 7.
 
 The build makes one installer per target, each with the payload for its
 target, and records the target in the installer's manifest.
@@ -374,23 +375,26 @@ target, and records the target in the installer's manifest.
 Path templates in `install.dir` and `keep_on_uninstall` can use these
 names. Each one is resolved on the machine that runs the installer.
 
-| Placeholder | Linux, per-user | Linux, system |
-|---|---|---|
-| `{id}`, `{name}`, `{version}` | From `app`. | From `app`. |
-| `{home}` | `$HOME` | none: a validation error |
-| `{data}` | `$XDG_DATA_HOME`, else `~/.local/share` | `/usr/local/share` |
-| `{config}` | `$XDG_CONFIG_HOME`, else `~/.config` | `/etc` |
-| `{bin}` | `~/.local/bin` | `/usr/local/bin` |
+| Placeholder | Linux, per-user | Linux, system | Windows, per-user |
+|---|---|---|---|
+| `{id}`, `{name}`, `{version}` | From `app`. | From `app`. | From `app`. |
+| `{home}` | `$HOME` | none: a validation error | `%USERPROFILE%` |
+| `{data}` | `$XDG_DATA_HOME`, else `~/.local/share` | `/usr/local/share` | `%LOCALAPPDATA%`, else `%USERPROFILE%\AppData\Local` |
+| `{config}` | `$XDG_CONFIG_HOME`, else `~/.config` | `/etc` | `%APPDATA%`, else `%USERPROFILE%\AppData\Roaming` |
+| `{bin}` | `~/.local/bin` | `/usr/local/bin` | none: the install stops |
 
 An unknown placeholder is a validation error. A relative `XDG_*` value is
-ignored, as the XDG base directory specification requires.
+ignored, as the XDG base directory specification requires; so is a relative
+`LOCALAPPDATA` or `APPDATA`. Windows has no system scope yet. See
+[platforms.md](platforms.md).
 
 ## What an install writes
 
 Inside the install directory:
 
 - the payload;
-- `uninstall`, the uninstaller built with the installer;
+- `uninstall` (`uninstall.exe` on Windows), the uninstaller built with the
+  installer;
 - `.fynstall/receipt.json`, the record of every change the install made;
 - `.fynstall/backup/`, a copy of every file the install replaced.
 
@@ -403,6 +407,10 @@ Outside it:
 - `{bin}/<name>` for each link.
 - `{config}/systemd/user/<name>.service` for each service, on Linux;
   `/etc/systemd/system/<name>.service` for a system install.
+
+On Windows the installer writes the index entry and nothing else outside
+the install directory, apart from the configuration files: launcher
+entries, icons and links are not applied there yet.
 
 A file or link that is already at one of these paths is saved first. A
 link is saved as its target, so the uninstaller puts back a link and not a

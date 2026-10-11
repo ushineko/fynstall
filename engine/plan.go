@@ -24,12 +24,12 @@ import (
 	"github.com/ushineko/fynstall/platform"
 )
 
-// Names inside an install directory that fynstall owns.
+// Names inside an install directory that fynstall owns. UninstallName is
+// the fourth, and has the OS's suffix for a program (R9c).
 const (
-	MetaDir       = ".fynstall"
-	ReceiptName   = "receipt.json"
-	BackupDir     = "backup"
-	UninstallName = "uninstall"
+	MetaDir     = ".fynstall"
+	ReceiptName = "receipt.json"
+	BackupDir   = "backup"
 )
 
 // Source says where Apply reads a planned file from.
@@ -259,6 +259,9 @@ func (p *Plan) inRoot(rel string) string {
 // outside the install directory: under {data} and {bin}.
 func (p *Plan) addIntegration(vars map[string]string) error {
 	m := p.Manifest
+	if !platform.HasDesktopIntegration {
+		return nil
+	}
 	data, bin := vars["data"], vars["bin"]
 	for _, ic := range m.Icons {
 		f := manifest.File{Path: ic.Path(), Size: ic.Bytes, SHA256: ic.SHA256, Mode: 0o644}

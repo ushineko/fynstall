@@ -578,6 +578,90 @@ decision.
 
 ### Phase 7: Windows (R18, R19, R9f, registry restore in R9a/R9d)
 
+Several PRs, as phases 4 and 6 were. 7a is a per-user install and uninstall
+from the command line, and the tests running on Windows. Proposed for the
+rest: 7b the registry journal (the Uninstall entry, `PATH`), the Start Menu
+shortcut and the icon resource; 7c the wizard, mode selection (R19) and the
+helper under UAC with system scope; 7d services, permissions and the leaf
+requirements.
+
+Chosen for 7a (2026-10-10). Each is for the maintainer to confirm in the
+PR; none changes the config format or the receipt.
+
+- Windows work is done on a Windows 11 machine, not cross-built and run in
+  a VM, so the integration tests run a real installer natively. A Windows
+  target still builds from Linux with `--cli-only`, which needs no C
+  compiler.
+- Per-user paths: `{home}` is `%USERPROFILE%`, `{data}` is `%LOCALAPPDATA%`
+  and `{config}` is `%APPDATA%`, each falling back to the profile as the
+  XDG variables fall back to `HOME`. The index is
+  `{data}\fynstall\installs`, by the same rule as on Linux.
+- There is no `{bin}` on Windows: a link becomes a `PATH` entry (L10), so
+  no directory of links exists to name.
+- R9f: the uninstaller moves its own running file to `%TEMP%` (Windows
+  allows a rename of a running program on the same volume), removes the
+  now empty install directory in the same run, and asks for the moved file
+  to be deleted at the next start, which only an administrator is allowed.
+  The install directory is gone when the uninstaller exits, not after a
+  reboot, and an upgrade needs no wait: the old uninstaller has finished
+  when it exits. For a normal user the moved file stays in `%TEMP%`, as
+  Inno Setup's does. Not chosen: a copy run from `%TEMP%` that removes the
+  original after it exits, because the caller would see the exit before
+  the directory is gone.
+- L3: the lock is held by the mutex existing, not by a thread owning it,
+  so a goroutine that changes thread does not lose it.
+- What 7a leaves out is said, not silent: system scope is refused with a
+  message, and an installer whose config has launcher entries, icons or
+  links says they are not applied on this platform yet (spec 002).
+
+Open after 7a, to decide before 7b:
+
+- The default install directory. `{data}/{id}` gives
+  `%LOCALAPPDATA%\io.ushineko.hello`, and R18 says
+  `%LOCALAPPDATA%\Programs\<name>`. `/opt/{id}`, the system default, is not
+  a path on Windows. One option is a `{programs}` placeholder that is
+  `{data}` and `/opt` on Linux, so today's defaults keep their meaning, and
+  `%LOCALAPPDATA%\Programs` and `%ProgramFiles%` on Windows.
+- `examples/hello` names `bin/hello`, which is `bin/hello.exe` on Windows:
+  "the same config, unchanged" needs `{exe}` in that config.
+
+Phase 7a:
+
+- [x] `fynstall build --cli-only --target windows/amd64` produces an `.exe`
+      installer and uninstaller, and one `examples/greet` config builds all
+      three of its targets from one machine
+      (`TestOneConfigBuildsEveryTargetFromThisMachine` on Windows; the
+      Linux half, `TestOneConfigInstallsEachTargetsOwnPayload`, is extended
+      and compiles, but has not run: see Verification).
+- [x] Install, then uninstall, leaves the profile as it was, and the
+      installed `uninstall.exe` is the artifact in `dist`
+      (`TestInstallWritesThePayloadAndTheUninstallerRemovesIt`).
+- [x] R9f for a per-user install: the install directory is gone when the
+      uninstaller exits (the same test, and every uninstall test's
+      snapshot).
+- [x] The uninstaller puts back a file the install replaced
+      (`TestUninstallRestoresAFileTheInstallReplaced`).
+- [x] Upgrade, repair and downgrade per-user: the old `uninstall.exe` is
+      probed and run, and the lock passes to it and back
+      (`TestANewerInstallerRemovesThroughTheInstalledUninstaller`,
+      `TestAnUpgradeKeepsTheParametersItWasGiven`).
+- [x] Leftovers are listed, or removed with `--remove-leftovers`
+      (`TestLeftoversAreListedOrRemoved`).
+- [x] The install lock is a named mutex
+      (`TestTheLockRefusesASecondHolderUntilReleased`, which now runs on
+      both platforms).
+- [x] Builds are reproducible on Windows (`TestBuildsAreReproducible`).
+- [x] System scope is refused, and a config that offers it still installs
+      per-user (`TestSystemScopeIsRefusedAndPerUserStillInstalls`).
+- [x] `go test ./...` passes on Windows. Tests of Linux behaviour (launcher
+      entries, systemd, `pkexec`, the wizard) are built for Linux only.
+- [ ] Desk check on Windows 11, in a console: the installer asks its
+      questions and reads a secret without showing it; `--dry-run` lists the
+      plan; the uninstaller, run from another directory, leaves no install
+      directory.
+
+The whole of phase 7:
+
 - [ ] `fynstall build --target windows/amd64` from Linux produces an `.exe`
       with the icon embedded as a resource.
 - [ ] Desk check in the win11-kvm VM. Double-click opens the wizard with no
@@ -605,9 +689,10 @@ need a decision first.
       Windows, journalled and restored. Decide first which account the
       `service` role is (LocalSystem, a virtual service account, or a
       `user:` on the service action) on both platforms.
-- [ ] Spec 002 L3 on Windows: the install lock is a named mutex per app ID
+- [x] Spec 002 L3 on Windows: the install lock is a named mutex per app ID
       and scope (`Local\` for per-user, `Global\` for system), with the same
-      refusal message as on Linux.
+      refusal message as on Linux. (Phase 7a; the `Global\` name is written
+      and runs first with system scope.)
 - [ ] The privileged helper under UAC (R13, R14): the installer and the
       uninstaller stay the person's own processes and run themselves with
       `--apply-plan` or `--apply-uninstall` through `ShellExecuteEx` with
@@ -628,6 +713,10 @@ need a decision first.
       (needs administrator rights for system scope) and a copy of the
       uninstaller run from `%TEMP%` that removes the original and then
       itself at reboot. The install directory must be gone after a reboot.
+      (Phase 7a chose a third way for per-user scope, above: the running
+      file is moved to `%TEMP%`. System scope, where the helper is an
+      administrator and the delete at the next start is allowed, is still
+      to do.)
 - [ ] Upgrade, repair and downgrade (phase 6a) on Windows: the old
       `uninstall.exe` is probed with `-h` and run with `--upgrade` or
       `--quiet`, a running service is stopped through the SCM before its
@@ -783,6 +872,35 @@ Desk check, in the user's real home directory:
   `~/.local/share/io.ushineko.hello` and `~/.local/share/fynstall` did not
   exist. `~/.config/io.ushineko.hello/settings.json`, a kept path that Hello
   rewrote while it ran, was still present with its sha256 unchanged.
+
+### Phase 7a (2026-10-10)
+
+On Windows 11 Pro, Go 1.27.0, with the MSYS2 UCRT64 gcc for the packages
+that have a window. `go test -race ./...` passes, and the pinned
+golangci-lint v2.12.2 reports 0 issues. `govulncheck` is not installed on
+this machine and was not run; this phase changes no dependency.
+
+Not run: anything on Linux. This machine has no Linux. The code and the
+tests compile for Linux (`go vet` and `go test -run` nothing, with
+`GOOS=linux`, `CGO_ENABLED=0` and `-tags nogui`), and the Linux
+integration tests changed in one place, the greet build, which now has a
+third target. Run `make test` on Linux before this merges.
+
+One mutation was checked: with the uninstaller's move of its own file
+disabled, seven of the Windows integration tests fail.
+
+A Windows checkout with `core.autocrlf` gave every Go file CRLF line ends,
+which `gofmt` and the linter report as unformatted. `.gitattributes` now
+keeps Go sources LF.
+
+By hand, with the greet installer against a scratch profile (no console,
+so no prompts): `--dry-run` listed 10 directories, 3 files, the index
+entry and the receipt; `--yes --verbose` installed them; the installed
+`greet.exe` ran; `uninstall.exe --verbose` removed 4 files and left the
+profile empty, with one `fynstall-removed-<number>.exe` of the
+uninstaller's size in the temporary directory.
+
+The console desk check in the phase 7a list is still to do.
 
 ### Phase 6b (2026-10-09)
 

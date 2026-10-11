@@ -1,4 +1,7 @@
-//go:build !nogui
+// The wizard on Windows, and these tests with it, come later in spec 001
+// phase 7.
+
+//go:build !nogui && linux
 
 package installer
 

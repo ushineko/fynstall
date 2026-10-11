@@ -40,5 +40,4 @@ actions:
         name: "{param:name}"
         token: "{param:token}"
 
-# windows/amd64 joins in spec 001 phase 7.
-targets: [linux/amd64, linux/arm64]
+targets: [linux/amd64, linux/arm64, windows/amd64]

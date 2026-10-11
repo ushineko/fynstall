@@ -13,6 +13,7 @@ import (
 	"github.com/ushineko/fynstall/engine"
 	"github.com/ushineko/fynstall/internal/version"
 	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/platform"
 )
 
 /*
@@ -244,7 +245,7 @@ func handOver(app manifest.App, self string, args []string, e Env, problem func(
 	if errors.Is(err, fs.ErrNotExist) {
 		ix, _, err = engine.ReadIndex(&manifest.Manifest{App: app}, "system", e.Getenv)
 	}
-	if errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, platform.ErrScopeUnavailable) {
 		return problem(fmt.Sprintf("%s is not installed for this user or for everyone, so there is nothing to remove.", app.Name))
 	}
 	if err != nil {

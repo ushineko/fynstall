@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package installer
 
@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// isTerminal is a character-device check until each platform gets its own
-// (Windows in spec 001 phase 7).
+// isTerminal is a character-device check on an OS without its own.
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0

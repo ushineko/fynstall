@@ -16,6 +16,7 @@ import (
 
 	"github.com/ushineko/fynstall/engine"
 	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/platform"
 )
 
 /*
@@ -52,7 +53,7 @@ func findExisting(m *manifest.Manifest, scope string, getenv func(string) string
 				ix.Scope = s
 			}
 			return ix, nil
-		case !errors.Is(err, fs.ErrNotExist):
+		case !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, platform.ErrScopeUnavailable):
 			return nil, err
 		}
 	}

@@ -92,8 +92,8 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 		if !slices.Contains(config.KnownTargets, t) {
 			return nil, fmt.Errorf("unknown target %q", t)
 		}
-		if strings.HasPrefix(t, "windows/") {
-			return nil, fmt.Errorf("target %s: Windows arrives in spec 001 phase 7", t)
+		if strings.HasPrefix(t, "windows/") && !o.CLIOnly {
+			return nil, fmt.Errorf("target %s: the wizard on Windows arrives later in spec 001 phase 7; build it with --cli-only", t)
 		}
 	}
 	var variants []bool
@@ -141,10 +141,11 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 			if !gui {
 				name += "-cli"
 			}
+			exe := manifest.BuildVars(t)["exe"]
 			a := Artifact{
 				Target: t, GUI: gui,
-				Installer:   filepath.Join(o.OutDir, name+"-installer"),
-				Uninstaller: filepath.Join(o.OutDir, name+"-uninstaller"),
+				Installer:   filepath.Join(o.OutDir, name+"-installer"+exe),
+				Uninstaller: filepath.Join(o.OutDir, name+"-uninstaller"+exe),
 			}
 			if err := buildTarget(ctx, o, mod, goos, goarch, m.App, manifestJSON, files, generated, a); err != nil {
 				return nil, fmt.Errorf("target %s: %w", t, err)
@@ -215,7 +216,10 @@ func moduleFiles(o Options) (map[string][]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("runtime path: %w", err)
 		}
-		fmt.Fprintf(&gomod, "require %s v0.0.0\n\nreplace %s => %s\n", RuntimeModule, RuntimeModule, abs)
+		// Slashes on every OS: go.mod reads a backslash path too, but not
+		// one with a space in it unless it is quoted, and %q would double
+		// the backslashes.
+		fmt.Fprintf(&gomod, "require %s v0.0.0\n\nreplace %s => %q\n", RuntimeModule, RuntimeModule, filepath.ToSlash(abs))
 		// The checkout's go.sum covers every module its go.mod names, so
 		// the build needs no network.
 		sum, err := os.ReadFile(filepath.Join(abs, "go.sum"))

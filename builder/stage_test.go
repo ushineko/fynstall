@@ -149,7 +149,8 @@ func TestALinkThatLeavesThroughAnotherLinkIsRefused(t *testing.T) {
 	require.NoError(t, os.Symlink("x/../../secret", filepath.Join(dir, "share", "d1", "d2", "l")))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "secret"), []byte("s"), 0o600))
 	_, _, _, err := stage(cfg(dir, config.Entry{Src: "share", Dst: "share"}), "test", "linux/amd64")
-	require.ErrorContains(t, err, "x/../../secret, which is outside the payload entry")
+	// Windows keeps the target with its own separator.
+	require.ErrorContains(t, err, filepath.FromSlash("x/../../secret")+", which is outside the payload entry")
 }
 
 func TestAFileUnderAPayloadLinkIsRefused(t *testing.T) {
