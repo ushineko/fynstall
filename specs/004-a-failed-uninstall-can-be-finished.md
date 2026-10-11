@@ -113,6 +113,14 @@ Not in this spec:
   (`builder`: `TestAnInstallWithNoIndexEntryIsRemovedByItsRecord`).
 - [x] `go test ./...` and the linter pass on Windows.
 - [x] `make test` and `make lint` pass on Linux.
+- [x] On Linux, a repair whose old uninstaller cannot remove one file (a
+  non-empty directory where a payload file was) exits non-zero and leaves
+  the receipt, the index entry and the uninstaller; once the obstacle is
+  gone, the same repair succeeds. An install whose index entry was deleted
+  is removed by `--force-receipt-uninstall`, and the home is as it was
+  (`builder`: `TestAFailedRepairCanBeRunAgainAndFinishes`,
+  `TestForceReceiptUninstallFindsAnInstallWithNoIndexEntry`; both fail
+  with the engine and installer of `dc0aa5a`).
 - [ ] Desk check on Windows: the repair of the consuming project that
   failed in issue #33 succeeds, or fails and can be run again.
 
