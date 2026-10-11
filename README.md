@@ -1,6 +1,6 @@
 # fynstall
 
-**Version**: 0.1.0
+**Version**: 0.1.1
 
 An installer framework for Go and [Fyne](https://fyne.io) programs. You
 describe a program in `fynstall.yaml`, and `fynstall build` produces one
@@ -114,7 +114,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
-### Unreleased
+### 0.1.1 (2026-10-11)
 
 - A builder from `go install` knows its release: with no version stamped
   by the Makefile, the builder reads the module version that the Go
