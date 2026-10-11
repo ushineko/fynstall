@@ -27,7 +27,8 @@ written for another fynstall, or has a page with no window.
 - **The examples.** The spec names `greet` and `hello`. The example is a
   new program, `examples/keyed`, so that the tests of the other two do not
   change.
-- **Linux.** Written and unrun: see Verification.
+- **The desk checks** of both phases, and an install for everyone with
+  hooks, which no test runs.
 
 ## Context
 
@@ -272,5 +273,14 @@ One fault was found by the integration test and fixed before it landed: a
 silent install with no value for a page's required parameter went ahead,
 because the command line dropped the page's error.
 
-Not run: Linux (the tests build there, by `go vet` for `GOOS=linux`), an
-install for everyone with hooks, and the desk checks of both phases.
+The same day on CachyOS (kernel 6.18, Go 1.27): `go test ./...` passes,
+with the same tests, and `make lint` reports 0 issues.
+
+hayami is the first program built on it (hayami spec 059): its installer has
+a page that checks for LibreHardwareMonitor and offers to set it up, a hook
+that does so after the install, and a hook that stops the panel before an
+uninstall. Its command-line installer installed and uninstalled in a
+temporary profile on Windows 11, hooks included.
+
+Not run: an install for everyone with hooks, and the desk checks of both
+phases.

@@ -10,8 +10,8 @@ A launcher entry takes `autostart: true`. The installer then also puts the
 entry where the desktop looks for what to start when its user logs in: the
 XDG autostart directory on Linux, the Startup folder on Windows. It is in
 the plan, in the receipt's journal and in the uninstall, as the launcher
-entry is. Linux is written and unrun: the checks on a Linux machine are
-open.
+entry is. The tests pass on Windows and on Linux. The desk checks, a login
+on each, are open.
 
 ## Context
 
@@ -51,7 +51,7 @@ declared in `fynstall.yaml`.
       the launcher's in the Start Menu, and the uninstall leaves the home
       and the registry as they were
       (`TestAnEntryThatStartsAtLoginIsInThePlaceTheDesktopLooks`).
-- [ ] R2 The same test on Linux: the entry is in `{config}/autostart`,
+- [x] R2 The same test on Linux: the entry is in `{config}/autostart`,
       with the program's path and no Uninstall action.
 - [ ] Desk check, Windows: after an install and a new login, the program
       is running.
@@ -71,5 +71,6 @@ declared in `fynstall.yaml`.
 
 ## Verification
 
-2026-10-11, Windows 11: `go test ./installer ./config` pass, with the two
-tests above. The Linux run and both desk checks are open.
+2026-10-11, Windows 11 and CachyOS (kernel 6.18, Go 1.27): `go test ./...`
+passes on both, with the two tests above, and `make lint` reports 0 issues
+on Linux. Both desk checks are open.
