@@ -9,16 +9,16 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-// RegistryRoot is the key under HKCU that every registry key of a per-user
-// install is moved under: "" (the real registry), or
+// RegistryRoot is the key under HKCU that every registry key of an
+// install is moved under, HKLM keys too: "" (the real registry), or
 // FYNSTALL_TEST_REGISTRY_ROOT for the tests, which must not write the
 // Uninstall entry or the PATH of the person who runs them.
 //
 // It is honoured in an elevated process too. Developers run the tests from
 // elevated consoles, and a variable that is ignored there sends the tests'
-// writes to the real registry. The variable moves only the person's own
-// keys; the helper of a system install must not take it from the process
-// that starts it (spec 001 phase 7c).
+// writes to the real registry. A helper that was started through a UAC
+// prompt, with more rights than the process that started it, drops the
+// variable (package installer, helperChannel).
 func RegistryRoot(env func(string) string) string {
 	return strings.Trim(env("FYNSTALL_TEST_REGISTRY_ROOT"), `\`)
 }

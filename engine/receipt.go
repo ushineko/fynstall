@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/ushineko/fynstall/manifest"
+	"github.com/ushineko/fynstall/platform"
 )
 
 // ReceiptSchema is the receipt format version. An uninstaller is built with
@@ -127,6 +128,9 @@ func ReadIndex(m *manifest.Manifest, scope string, env func(string) string) (*In
 	var ix Index
 	if err := readJSON(p, &ix); err != nil {
 		return nil, p, err
+	}
+	if err := platform.IndexTrusted(v, p); err != nil {
+		return nil, p, err //nolint:wrapcheck // the message is the platform's
 	}
 	return &ix, p, nil
 }

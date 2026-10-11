@@ -96,7 +96,7 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 		return uninstallGUI(r, yes, e.Getenv)
 	}
 
-	if needsElevation(r.Scope) {
+	if needsElevation(r.Scope, e.Getenv) {
 		return uninstallElevated(r, removeLeftovers, quiet, verbose, why, e)
 	}
 	unlock, err := engine.Lock(r.App.ID, r.Scope, e.Getenv)

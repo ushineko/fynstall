@@ -154,6 +154,7 @@ func setup(work string) error {
 	// A program with everything the Windows shell is told about.
 	dir = filepath.Join(work, "shell")
 	cfg = "app:\n  id: io.example.shell\n  name: Shell Example\n  version: 1.2.3\n  publisher: Example Makers\n  icon: icon.png\n" +
+		"install:\n  scopes: [user, system]\n" +
 		"payload:\n  - src: greet.exe\n    dst: bin/greet.exe\n" +
 		"integration:\n  path_links: [bin/greet.exe]\n  desktop:\n    - name: Shell Example\n      comment: Greets\n      exec: bin/greet.exe\n      args: [--flag, two words]\n"
 	if err := copyFile(filepath.Join(src, "build", "windows-amd64", "greet.exe"), filepath.Join(dir, "greet.exe")); err != nil {
@@ -205,13 +206,18 @@ type home struct {
 	// reg is the test's own registry root, below HKCU: the installer writes
 	// its Uninstall entry and PATH there, never in the real ones.
 	reg string
+	// sys is the root a system install goes under instead of the machine's
+	// folders. It is inside dir, so one snapshot covers both scopes.
+	sys string
 }
 
 func newHome(t *testing.T, id string) home {
 	t.Helper()
 	require.NoError(t, setupFail)
 	d := t.TempDir()
-	return home{dir: d, root: filepath.Join(d, "AppData", "Local", "Programs", id), tmp: t.TempDir(), path: t.TempDir(), reg: regtest.Root(t)}
+	sys := filepath.Join(d, "machine")
+	require.NoError(t, os.Mkdir(sys, 0o750))
+	return home{dir: d, root: filepath.Join(d, "AppData", "Local", "Programs", id), tmp: t.TempDir(), path: t.TempDir(), reg: regtest.Root(t), sys: sys}
 }
 
 func greetHome(t *testing.T) home { return newHome(t, "io.ushineko.greet") }
@@ -230,7 +236,10 @@ func (h home) run(t *testing.T, prog string, args ...string) (int, string) {
 	cmd := exec.CommandContext(t.Context(), prog, args...)
 	require.NotEmpty(t, h.reg, "without its own registry root an installer would write the real registry")
 	cmd.Env = []string{"USERPROFILE=" + h.dir, "PATH=" + h.path, "TEMP=" + h.tmp, "TMP=" + h.tmp,
-		"SystemRoot=" + os.Getenv("SystemRoot"), regtest.Env + "=" + h.reg}
+		"SystemRoot=" + os.Getenv("SystemRoot"), regtest.Env + "=" + h.reg,
+		// A system install goes under the test's root, and its helper starts
+		// with no UAC prompt.
+		"FYNSTALL_TEST_SYSTEM_ROOT=" + h.sys, "FYNSTALL_ELEVATE=direct"}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
@@ -453,17 +462,50 @@ func TestTheUninstallerInDistHandsOverToTheInstalledOne(t *testing.T) {
 
 // A config that offers both scopes installs per-user on Windows, and says
 // that the other scope is not there yet rather than failing on it.
-func TestSystemScopeIsRefusedAndPerUserStillInstalls(t *testing.T) {
+// An install for everyone on the computer: the installer stays the
+// person's own process, and a helper makes the changes and reports over
+// its pipes (R13). The files go under the machine's folders and the
+// registry entries under HKLM, both moved under the test's roots. The
+// uninstaller starts a helper of its own and puts everything back.
+func TestASystemInstallGoesThroughTheHelperAndComesOutAgain(t *testing.T) {
+	h := newHome(t, "io.example.shell")
+	before := h.snap(t)
+
+	code, out := h.run(t, shell.Installer, "--yes", "--scope", "system")
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "needs an administrator")
+	require.Contains(t, out, "==> Registering with Windows", "the helper's steps are shown as the installer's own")
+	require.Contains(t, out, "is on the PATH of this computer")
+
+	root := filepath.Join(h.sys, "Program Files", "io.example.shell")
+	uninstaller := filepath.Join(root, "uninstall.exe")
+	require.Equal(t, sum(t, shell.Uninstaller), sum(t, uninstaller))
+	require.NoDirExists(t, h.root, "nothing in the person's own folders")
+	require.FileExists(t, filepath.Join(h.sys, "ProgramData", "fynstall", "installs", "io.example.shell.json"))
+	require.FileExists(t, filepath.Join(h.sys, "ProgramData", "Microsoft", "Windows", "Start Menu", "Programs", "Shell Example.lnk"))
+	const key = `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\io.example.shell`
+	require.Equal(t, root, h.value(t, key, "InstallLocation"))
+	require.Equal(t, `"`+uninstaller+`" --quiet`, h.value(t, key, "QuietUninstallString"))
+	require.Equal(t, filepath.Join(root, "bin"), h.value(t, `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment`, "Path"))
+
+	// A later installer finds the system install without being told the
+	// scope, and replaces it through a helper (R17).
+	code, out = h.run(t, shell.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	require.NoDirExists(t, h.root, "a repair goes where the install is")
+	require.FileExists(t, uninstaller)
+
+	code, out = h.run(t, uninstaller)
+	require.Equal(t, 0, code, out)
+	require.Contains(t, out, "removing it needs an administrator")
+	require.Equal(t, before, h.snap(t), "the machine's folders and registry are as they were")
+}
+
+func TestAConfigWithBothScopesInstallsPerUserByDefault(t *testing.T) {
 	h := newHome(t, "io.example.scopes")
 	before := h.snap(t)
 
-	code, out := h.run(t, twoScopes.Installer, "--yes", "--scope", "system")
-	require.Equal(t, 1, code, out)
-	require.Contains(t, out, "system scope")
-	require.Contains(t, out, "not available on this platform yet")
-	require.Equal(t, before, h.snap(t))
-
-	code, out = h.run(t, twoScopes.Installer, "--yes")
+	code, out := h.run(t, twoScopes.Installer, "--yes")
 	require.Equal(t, 0, code, out)
 	b, err := os.ReadFile(filepath.Join(h.root, "notes.txt"))
 	require.NoError(t, err)

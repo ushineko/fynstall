@@ -80,6 +80,8 @@ type Plan struct {
 	Root string
 	// Index is the install index file for this app and scope.
 	Index string
+	// vars are the placeholder values the plan was made with.
+	vars map[string]string
 	// Keep are the expanded keep_on_uninstall paths.
 	Keep []string
 	// Dirs are the directories that do not exist yet, parents first.
@@ -168,6 +170,7 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	}
 	p.Root = filepath.Clean(root)
 	p.Index = indexPath(vars, m.App.ID)
+	p.vars = vars
 	if _, err := os.Lstat(p.Index); err == nil && !p.gone[p.Index] {
 		return nil, fmt.Errorf("%s %w (index %s)", m.App.Name, ErrInstalled, p.Index)
 	}
@@ -243,7 +246,8 @@ func DefaultRoot(m *manifest.Manifest, scope string, env func(string) string) (s
 	if err != nil {
 		return "", fmt.Errorf("install directory: %w", err)
 	}
-	return platform.Rooted(vars, root), nil
+	// Cleaned, so the directory is shown with this OS's separators.
+	return platform.Rooted(vars, filepath.Clean(root)), nil
 }
 
 // Vars are the placeholder values for m in scope: the platform's locations

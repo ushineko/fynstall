@@ -47,6 +47,30 @@ const (
 	PathValue = "Path"
 )
 
+// The same keys for an install for everyone on the computer.
+const (
+	SystemUninstallKey   = `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall`
+	SystemEnvironmentKey = `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment`
+)
+
+// UninstallKeyOf is the key that Settings > Apps reads for an install in
+// v's scope, and EnvironmentKeyOf the key that holds its PATH: the person's
+// own, or the machine's.
+func UninstallKeyOf(v map[string]string) string {
+	if System(v) {
+		return RegKey(v, SystemUninstallKey)
+	}
+	return RegKey(v, UninstallKey)
+}
+
+// EnvironmentKeyOf is described with UninstallKeyOf.
+func EnvironmentKeyOf(v map[string]string) string {
+	if System(v) {
+		return RegKey(v, SystemEnvironmentKey)
+	}
+	return RegKey(v, EnvironmentKey)
+}
+
 // RegKey is key as the installer writes it: key itself, or, in the tests,
 // key moved under the registry root they name (see RegistryRoot).
 func RegKey(v map[string]string, key string) string {

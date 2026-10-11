@@ -35,7 +35,8 @@ func Rooted(v map[string]string, dir string) string {
 	if root == "" || !filepath.IsAbs(dir) || dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
 		return dir
 	}
-	return filepath.Join(root, dir)
+	// Without its drive on Windows: a path under the root has the root's.
+	return filepath.Join(root, dir[len(filepath.VolumeName(dir)):])
 }
 
 // Keys of Vars that are not placeholders: a template cannot name them,

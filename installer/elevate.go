@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -19,10 +18,11 @@ import (
 /*
 System scope runs only the changes as root (spec 001 R13). The installer
 and the uninstaller stay the person's own processes: they plan, ask and
-draw, then run this same program again under pkexec (the window) or sudo
-(the command line) with --apply-plan or --apply-uninstall. That helper
-reports on stdout, one JSON event per line, and the parent shows the
-events as its own.
+draw, then run this same program again as an administrator with
+--apply-plan or --apply-uninstall: under pkexec (the window) or sudo (the
+command line) on Linux, through a UAC prompt on Windows. That helper
+reports one JSON event per line, on its stdout or, on Windows, on a named
+pipe, and the parent shows the events as its own.
 
 The helper trusts nothing it is handed but the person's choices. An install
 request holds the scope, the directory and the parameter values, and the
@@ -56,33 +56,20 @@ var kinds = map[engine.EventKind]string{ //nolint:gochecknoglobals // a fixed ta
 	engine.Step: "step", engine.Detail: "detail", engine.Warn: "warn", engine.Progress: "progress",
 }
 
-// needsElevation reports whether changes in scope need a helper.
-func needsElevation(scope string) bool { return scope == "system" && os.Geteuid() != 0 }
-
-// elevator is the program that runs the helper as root: pkexec for the
-// window, which asks in a dialog, and sudo for the command line, which
-// asks in the terminal. FYNSTALL_ELEVATE names another, which the tests
-// use to run the helper without root.
-func elevator(gui bool, getenv func(string) string) (string, error) {
-	prog := "sudo"
-	if gui {
-		prog = "pkexec"
-	}
-	if p := getenv("FYNSTALL_ELEVATE"); p != "" {
-		prog = p
-	}
-	path, err := exec.LookPath(prog)
-	if err != nil {
-		return "", fmt.Errorf("this install is for everyone on this computer and needs an administrator, but %s is not installed", prog)
-	}
-	return path, nil
+// needsElevation reports whether changes in scope need a helper: a system
+// install, in a process that is not an administrator's. The tests ask for a
+// helper even then (helperForced), so that it runs where they run.
+func needsElevation(scope string, getenv func(string) string) bool {
+	return scope == "system" && (!privileged() || helperForced(getenv))
 }
 
 // helper is a running privileged helper, seen from the parent.
 type helper struct {
-	ctx     context.Context
-	cmd     *exec.Cmd
+	ctx context.Context
+	// stdin is what the helper reads: closing it stops the helper. wait
+	// waits for the helper to end.
 	stdin   io.WriteCloser
+	wait    func() error
 	sc      *bufio.Scanner
 	report  engine.Reporter
 	stop    func() bool
@@ -103,31 +90,24 @@ var helperProgram = func() (string, error) { //nolint:gochecknoglobals // a seam
 	return filepath.EvalSymlinks(self) //nolint:wrapcheck // as above
 }
 
-// startElevated runs this program as root with args. Its events go to
-// report. Cancelling ctx closes the helper's stdin, which is how a
-// person's process stops a root one.
+// errDenied is what a helper's wait returns when no administrator allowed
+// it to start.
+var errDenied = errors.New("an administrator did not allow it; nothing was changed")
+
+// startElevated runs this program as an administrator with args. Its
+// events go to report. Cancelling ctx closes the helper's input, which is
+// how a person's process stops a privileged one. How the helper is started
+// and how the two talk is the platform's (launchHelper).
 func startElevated(ctx context.Context, gui bool, getenv func(string) string, stderr io.Writer, args []string, report engine.Reporter) (*helper, error) {
-	prog, err := elevator(gui, getenv)
-	if err != nil {
-		return nil, err
-	}
 	self, err := helperProgram()
 	if err != nil {
 		return nil, fmt.Errorf("find this program: %w", err)
 	}
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), prog, append([]string{self}, args...)...) // #nosec G204 -- this program, under the elevation program
-	cmd.Stderr = stderr
-	h := &helper{ctx: ctx, cmd: cmd, report: report}
-	if h.stdin, err = cmd.StdinPipe(); err != nil {
-		return nil, fmt.Errorf("start the helper: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
+	stdin, stdout, wait, err := launchHelper(ctx, gui, getenv, stderr, self, args)
 	if err != nil {
-		return nil, fmt.Errorf("start the helper: %w", err)
+		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start %s: %w", prog, err)
-	}
+	h := &helper{ctx: ctx, stdin: stdin, wait: wait, report: report}
 	h.stop = context.AfterFunc(ctx, func() { _ = h.stdin.Close() })
 	h.sc = bufio.NewScanner(stdout)
 	h.sc.Buffer(make([]byte, 64<<10), 16<<20)
@@ -189,16 +169,14 @@ func (h *helper) finish() error {
 	_ = h.stdin.Close()
 	h.next()
 	h.stop()
-	waitErr := h.cmd.Wait()
-	var exit *exec.ExitError
+	waitErr := h.wait()
 	switch {
 	case h.failure != "":
 		return errors.New(h.failure)
 	case h.done && waitErr == nil:
 		return nil
-	case errors.As(waitErr, &exit) && (exit.ExitCode() == 126 || exit.ExitCode() == 127):
-		// pkexec's codes for a dismissed or failed authentication.
-		return errors.New("an administrator did not allow it; nothing was changed")
+	case errors.Is(waitErr, errDenied):
+		return errDenied
 	case errors.Is(h.ctx.Err(), context.Canceled):
 		return fmt.Errorf("stopped: %w", h.ctx.Err())
 	}

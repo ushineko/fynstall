@@ -108,7 +108,7 @@ func (p *Plan) addShellIntegration(vars map[string]string) error {
 		text("QuietUninstallString", uninstall+" --quiet"),
 		number("NoModify", 1), number("NoRepair", 1),
 	)
-	p.Registry = append(p.Registry, PlannedKey{Key: platform.RegKey(vars, platform.UninstallKey+`\`+m.App.ID), Values: values})
+	p.Registry = append(p.Registry, PlannedKey{Key: platform.UninstallKeyOf(vars) + `\` + m.App.ID, Values: values})
 
 	for _, l := range m.Links {
 		if dir := filepath.Dir(p.inRoot(l.Target)); !slices.Contains(p.PathDirs, dir) {
@@ -116,7 +116,7 @@ func (p *Plan) addShellIntegration(vars map[string]string) error {
 		}
 	}
 	if len(p.PathDirs) > 0 {
-		p.PathKey = platform.RegKey(vars, platform.EnvironmentKey)
+		p.PathKey = platform.EnvironmentKeyOf(vars)
 		p.RefreshMenu = true
 	}
 	return nil

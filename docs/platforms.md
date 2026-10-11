@@ -58,28 +58,34 @@ which shows the desktop's password dialog) or `sudo` (on the command line).
 
 ## Windows
 
-Windows has per-user installs, from the wizard and from the command line,
-with a Start Menu shortcut, an entry in Settings > Apps and an entry on
-`PATH`. An install for everyone on the computer and services follow in
-spec 001 phase 7.
+Windows has per-user installs and installs for everyone on the computer,
+from the wizard and from the command line, with a Start Menu shortcut, an
+entry in Settings > Apps and an entry on `PATH`. Services follow in spec 001
+phase 7.
 
 ### Paths
 
-| | Per-user |
-|---|---|
-| Install directory | `{programs}\{id}` |
-| `{programs}` | `{data}\Programs` |
-| `{home}` | `%USERPROFILE%` |
-| `{data}` | `%LOCALAPPDATA%`, else `%USERPROFILE%\AppData\Local` |
-| `{config}` | `%APPDATA%`, else `%USERPROFILE%\AppData\Roaming` |
-| `{bin}` | none |
-| Install index | `{data}\fynstall\installs\<id>.json` |
-| Uninstaller | `<install directory>\uninstall.exe` |
-| Launcher entries | `{config}\Microsoft\Windows\Start Menu\Programs\<name>.lnk` |
-| Icon | `<install directory>\.fynstall\app.ico` |
-| Links | the directory of each link's program, on the user's `PATH` |
-| Record for Settings > Apps | `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<id>` |
-| Install lock | the named mutex `Local\fynstall-<id>-user` |
+| | Per-user | System |
+|---|---|---|
+| Install directory | `{programs}\{id}` | `{programs}\{id}` |
+| `{programs}` | `{data}\Programs` | `%ProgramFiles%` |
+| `{home}` | `%USERPROFILE%` | none |
+| `{data}` | `%LOCALAPPDATA%`, else `%USERPROFILE%\AppData\Local` | `%ProgramData%` |
+| `{config}` | `%APPDATA%`, else `%USERPROFILE%\AppData\Roaming` | `%ProgramData%` |
+| `{bin}` | none | none |
+| Install index | `{data}\fynstall\installs\<id>.json` | `%ProgramData%\fynstall\installs\<id>.json` |
+| Uninstaller | `<install directory>\uninstall.exe` | the same |
+| Launcher entries | `{config}\Microsoft\Windows\Start Menu\Programs\<name>.lnk` | the Start Menu of all users, under `%ProgramData%` |
+| Icon | `<install directory>\.fynstall\app.ico` | the same |
+| Links | the directory of each link's program, on the user's `PATH` | the same, on the computer's `PATH` |
+| Record for Settings > Apps | `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<id>` | the same key under `HKLM` |
+| `PATH` | `HKCU\Environment` | `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment` |
+| Install lock | the named mutex `Local\fynstall-<id>-user` | `Global\fynstall-<id>-system` |
+
+A system install asks Windows where the machine's folders are. It does not
+read `ProgramFiles` or `ProgramData` from the environment, so a variable
+cannot send an administrator's writes elsewhere. Windows has one data
+folder for the machine, so `{data}` and `{config}` are the same there.
 
 `{data}` is the local folder, which stays on the machine. `{config}` is the
 roaming folder, which follows the profile, as settings do. A relative value
@@ -93,9 +99,40 @@ C compiler (`gcc` on `PATH`, as MSYS2 provides). `fynstall build --cli-only
 --target windows/amd64` builds from Linux and from Windows, with no C
 compiler.
 
-An installer that offers both scopes installs per-user on Windows: the
-wizard does not ask who the install is for, and `--scope system` stops and
-says that the scope is not available.
+### Elevation
+
+A per-user install never asks for elevation.
+
+A system install asks for an administrator once, through the UAC prompt. As
+on Linux, the installer and the uninstaller stay the person's own
+processes, and only the changes run as an administrator, in a helper: the
+same program started again with the verb `runas`.
+
+- The UAC prompt gives the two processes no pipes, so they talk over two
+  named pipes that the installer makes first: one that the helper reads and
+  one that it reports on. The pipes have a random name, admit only the
+  person, the administrators and the system, and take no client from another
+  computer. The helper opens them so that the installer cannot act with the
+  helper's rights.
+- The plan file, the digest check, the events, Cancel and the question
+  about leftovers work as on Linux. Closing the helper's input stops it.
+- When the person closes the UAC prompt, nothing changes and the installer
+  says that an administrator did not allow it.
+- A program that already runs as an administrator (an elevated console)
+  makes the changes itself, with no helper and no prompt.
+- The record of a system install is in `%ProgramData%`, where any user can
+  make files. The helper makes the record the administrators' own, and an
+  installer takes a record only when an administrator or the system owns
+  it. Otherwise it stops and names the file.
+- A helper that has more rights than the process that started it ignores
+  the variables the tests use to move an install
+  (`FYNSTALL_TEST_SYSTEM_ROOT`, `FYNSTALL_TEST_REGISTRY_ROOT`,
+  `FYNSTALL_ELEVATE`).
+
+A system install in a directory that users can write (one chosen with
+`--dir` outside `%ProgramFiles%`) leaves its uninstaller where a user can
+replace it, and Settings > Apps runs that file. Keep system installs under
+`%ProgramFiles%`.
 
 ### The wizard or the command line
 

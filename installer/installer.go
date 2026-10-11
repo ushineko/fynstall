@@ -67,13 +67,15 @@ func (e Env) modeFor(in modeInput) (mode, error) {
 
 // Main runs the installer with the process's arguments and exits.
 func Main(p Payload) {
-	os.Exit(Install(os.Args[1:], p, processEnv()))
+	args, e := helperChannel(os.Args[1:], processEnv())
+	os.Exit(Install(args, p, e))
 }
 
 // UninstallMain runs the uninstaller with the process's arguments and exits.
 // app is the program it belongs to, compiled in by the builder.
 func UninstallMain(app manifest.App) {
-	os.Exit(Uninstall(os.Args[1:], app, processEnv()))
+	args, e := helperChannel(os.Args[1:], processEnv())
+	os.Exit(Uninstall(args, app, e))
 }
 
 func processEnv() Env {
