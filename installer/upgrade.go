@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -58,6 +59,35 @@ func findExisting(m *manifest.Manifest, scope string, getenv func(string) string
 		}
 	}
 	return nil, nil
+}
+
+/*
+findUnindexed looks for an install of m that has its receipt and no index
+entry, in the default directory of each scope. It is what an uninstaller
+from before spec 004 leaves when it fails part-way: that one removed the
+index entry first. It returns nil when there is none.
+
+Only the default directory is looked in: the index is what says an install
+for everyone was written by an administrator, and without it a receipt in a
+directory someone names could be anybody's.
+*/
+func findUnindexed(m *manifest.Manifest, scope string, getenv func(string) string) *engine.Index {
+	scopes := append([]string{scope}, m.Scopes...)
+	for _, s := range slices.Compact(scopes) {
+		if !slices.Contains(m.Scopes, s) {
+			continue
+		}
+		root, err := engine.DefaultRoot(m, s, getenv)
+		if err != nil {
+			continue
+		}
+		r, err := engine.ReadReceipt(engine.ReceiptPath(root))
+		if err != nil || r.App.ID != m.App.ID || r.Scope != s || r.Root != root {
+			continue
+		}
+		return &engine.Index{Root: root, Uninstaller: r.Uninstaller, Version: r.App.Version, Scope: s}
+	}
+	return nil
 }
 
 // readExisting reads the receipt of the install ix names.
@@ -130,10 +160,16 @@ func runOldUninstaller(ctx context.Context, path string, report engine.Reporter)
 	err := cmd.Run()
 	_ = w.Close()
 	wg.Wait()
-	if err != nil {
-		return fmt.Errorf("the installed version's uninstaller failed, so nothing new was installed; run %s to finish removing it: %w", path, err)
+	if err == nil {
+		return nil
 	}
-	return nil
+	// An uninstaller from before spec 004 removes its own file and the index
+	// entry before it knows the rest went well.
+	if _, serr := os.Stat(path); serr != nil {
+		return fmt.Errorf("the installed version's uninstaller failed, so nothing new was installed, and it removed itself; "+
+			"run this installer with --force-receipt-uninstall to finish removing it: %w", err)
+	}
+	return fmt.Errorf("the installed version's uninstaller failed, so nothing new was installed; run %s to finish removing it, or run this installer again: %w", path, err)
 }
 
 // lock is the install lock, which an upgrade lets go of while the old

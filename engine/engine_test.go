@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -596,5 +597,37 @@ func TestAFailingRunCarriesItsOutputAndIsUndone(t *testing.T) {
 	_, statErr := os.Stat(marker)
 	require.NoError(t, statErr, "the failed run's undo ran")
 	require.NoError(t, os.Remove(marker))
+	require.Equal(t, before, f.snap(t))
+}
+
+// An uninstall that cannot remove one file leaves what a second run needs:
+// the receipt, the index entry and the uninstaller (spec 004 R1).
+func TestAnUninstallThatFailsLeavesItsRecordItsIndexEntryAndItsUninstaller(t *testing.T) {
+	f := newFixture(t)
+	before := f.snap(t)
+	r, err := f.install(t)
+	require.NoError(t, err)
+
+	// A directory with something in it where a file was: no OS removes it
+	// as a file.
+	stuck := filepath.Join(f.root(), "bin", "hello")
+	require.NoError(t, os.Remove(stuck))
+	write(t, filepath.Join(stuck, "inside"), "x")
+
+	var events []Event
+	_, err = Uninstall(r, ReasonUninstall, func(e Event) { events = append(events, e) })
+	require.ErrorContains(t, err, stuck)
+	for _, e := range events {
+		require.NotEqual(t, "removed "+stuck, e.Text, "what was not removed is not reported as removed")
+	}
+	for _, p := range []string{ReceiptPath(f.root()), r.Index, r.Uninstaller} {
+		_, err := os.Stat(p)
+		require.NoError(t, err, "%s is still there", p)
+	}
+	_, err = os.Stat(filepath.Join(f.root(), "share", "doc", "README"))
+	require.ErrorIs(t, err, fs.ErrNotExist, "the rest was removed")
+
+	require.NoError(t, os.RemoveAll(stuck))
+	f.uninstall(t)
 	require.Equal(t, before, f.snap(t))
 }
