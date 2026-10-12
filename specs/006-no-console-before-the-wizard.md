@@ -98,5 +98,6 @@ command line with `/S`, and they print nothing.
 
 2026-10-11, Windows 11 Pro build 26200: `go test ./builder/` passes with the
 test above. The probes and hayami's `--windowed` build are as the criteria
-say. `go test ./...` on both platforms, `make lint` and the desk checks are
-recorded here when they are run.
+say. `go test ./...` passes on Windows and on CachyOS (kernel 6.18), and
+`make lint` reports 0 issues on Linux, where the Windows file is not read.
+The desk checks are open.
