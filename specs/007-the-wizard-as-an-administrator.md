@@ -67,7 +67,8 @@ starting hayami 0.9.10's installer from an elevated shell.
 - [ ] R5 Desk check: a person without an administrator's rights, giving
       another account's name and password: the summary names that account.
       No test covers the row, and no such account is at hand.
-- [ ] R2 The tests on Linux.
+- [x] R2 The tests on Linux, where the mode for root is the command line
+      and `--gui` is refused (`TestChooseMode`).
 
 ## Risks & Assumptions
 
@@ -92,5 +93,5 @@ starting hayami 0.9.10's installer from an elevated shell.
 2026-10-11, Windows 11 Pro build 26200, in an elevated shell:
 `go test ./installer/` passes with the tests above. hayami's installer
 built with `--runtime-path` at this change opened its wizard when started
-from that shell. The desk checks and the Linux run are recorded here when
-they are done.
+from that shell. On CachyOS (kernel 6.18) `go test ./...` passes and
+`make lint` reports 0 issues. The desk checks are open.
