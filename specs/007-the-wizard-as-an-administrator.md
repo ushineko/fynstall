@@ -60,8 +60,10 @@ starting hayami 0.9.10's installer from an elevated shell.
 - [x] R4 An elevated installer starts the program through Explorer, and one
       that is not elevated starts it directly
       (`TestTheFinishPageLaunchesAfterAReplacement`).
-- [ ] R4 Desk check: an installer run as an administrator, "Launch now"
-      ticked: the program is running, and not as an administrator.
+- [x] R4 Desk check: an installer run as an administrator, "Launch now"
+      ticked: the program is running, and not as an administrator (hayami,
+      2026-10-12: the panel's parent is Explorer and its token is not
+      elevated; the install is per-user, by a wizard that was).
 - [ ] R1/R3 Desk check: an install for everyone from a wizard run as an
       administrator: no second prompt, and the install is there.
 - [ ] R5 Desk check: a person without an administrator's rights, giving
