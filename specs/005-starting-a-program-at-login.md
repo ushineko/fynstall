@@ -53,8 +53,8 @@ declared in `fynstall.yaml`.
       (`TestAnEntryThatStartsAtLoginIsInThePlaceTheDesktopLooks`).
 - [x] R2 The same test on Linux: the entry is in `{config}/autostart`,
       with the program's path and no Uninstall action.
-- [ ] Desk check, Windows: after an install and a new login, the program
-      is running.
+- [x] Desk check, Windows: after an install and a new login, the program
+      is running (hayami's installer, 2026-10-11).
 - [ ] Desk check, Linux (KDE Plasma): the same.
 
 ## Risks & Assumptions
