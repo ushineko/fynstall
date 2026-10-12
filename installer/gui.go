@@ -212,6 +212,9 @@ func (g *installWizard) welcome() string {
 		s += " from " + g.m.App.Publisher
 	}
 	switch {
+	case slices.Contains(g.m.Scopes, "system") && elevated():
+		// Run as an administrator already: nothing more is asked for.
+		s += ".\n\n"
 	case slices.Contains(g.m.Scopes, "system") && len(g.m.Scopes) > 1:
 		s += ".\n\nInstalled for you, it needs no administrator rights. Installed for everyone on this computer, " +
 			"it asks for an administrator once. "
@@ -358,6 +361,11 @@ func (s *summaryPage) Enter(w *wizard.Wizard) {
 	}
 	if g.old != nil {
 		rows = append(rows, widgets.PlainRow("Replaces", replacementText(g.m, g.old.receipt.App.Version)+", through its own uninstaller"))
+	}
+	if account := runsAs(); account != "" && g.plan.Scope == "user" {
+		// Started with another account's name and password: "for you" is
+		// that account, and the person at the desktop will not find it.
+		rows = append(rows, widgets.PlainRow("Installed for", account+", the account this installer runs as, not the one at this desktop"))
 	}
 	rows = append(rows,
 		widgets.PlainRow("Location", g.plan.Root),
@@ -633,7 +641,10 @@ func (g *installWizard) after(r wizard.Result) int {
 		return exitOK
 	}
 	if g.launch != nil && r.Checks[LaunchNow] {
-		start(filepath.Join(g.plan.Root, filepath.FromSlash(g.m.Launch)), false)
+		// As the person at the desktop, also when the installer runs as an
+		// administrator (spec 007).
+		name, args := desktopCommand(filepath.Join(g.plan.Root, filepath.FromSlash(g.m.Launch)), g.e.Getenv)
+		start(name, false, args...)
 	}
 	return exitOK
 }

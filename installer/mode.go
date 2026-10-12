@@ -22,13 +22,13 @@ type modeInput struct {
 	// interactive is a terminal on stdin that a person typed the command
 	// into; display is true when a window can be shown.
 	interactive, display bool
-	// root is true when the process runs as root, or elevated on Windows,
-	// which the window never does (spec 001 R13).
+	// root is true when the process runs as root, or elevated on Windows.
+	// A window does not run as root (spec 001 R13).
 	root bool
-	// rootWindow lifts that rule: the uninstaller on Windows, which
-	// Settings > Apps starts as an administrator for an install for
-	// everyone, and whose window must then open or nothing is seen to
-	// happen.
+	// rootWindow lifts that rule, and is true on Windows (spec 007): an
+	// installer started with "Run as administrator", and the uninstaller
+	// that Settings > Apps starts as one for an install for everyone, must
+	// open their window or nothing is seen to happen.
 	rootWindow bool
 }
 

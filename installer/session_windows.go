@@ -88,13 +88,90 @@ func usable(f *os.File) bool {
 	return err == nil && t != windows.FILE_TYPE_UNKNOWN
 }
 
-// uninstallWindowAsAdmin is true: Settings > Apps starts the uninstaller of
-// an install for everyone as an administrator, with --gui, and there is no
-// asking it not to. A window that refused to open there left the program
-// installed and showed nothing. The installer's wizard keeps the rule (R13):
-// it is started by a person, as that person.
-const uninstallWindowAsAdmin = true
+// windowAsAdmin is true: a window opens for a program that runs as an
+// administrator (spec 007). Settings > Apps starts the uninstaller of an
+// install for everyone that way, with --gui, and there is no asking it not
+// to. And people start an installer with "Run as administrator": a wizard
+// that refused left them with a command line that asked nothing, or, in a
+// program with a window, with nothing at all.
+const windowAsAdmin = true
 
 // privileged reports whether the process runs as an administrator with its
-// rights in force (elevated), which the window never does (R13).
+// rights in force (elevated).
 func privileged() bool { return windows.GetCurrentProcessToken().IsElevated() }
+
+/*
+desktopCommand is the command that starts the program at path for the person
+at the desktop. An installer that runs as an administrator would start it as
+one too, and a program a person uses should not have those rights: Explorer
+is asked to start it, which it does as itself, with the desktop's rights.
+*/
+func desktopCommand(path string, getenv func(string) string) (string, []string) {
+	if !elevated() {
+		return path, nil
+	}
+	return viaExplorer(path, getenv("SystemRoot"))
+}
+
+// viaExplorer is the command that has Explorer start path.
+func viaExplorer(path, systemRoot string) (string, []string) {
+	if systemRoot == "" {
+		systemRoot = `C:\Windows`
+	}
+	return systemRoot + `\explorer.exe`, []string{path}
+}
+
+/*
+otherAccount names the account this program runs as, when that is not the
+account of the desktop it is shown on: a person without an administrator's
+rights started it with another account's name and password. A per-user
+install then goes to that other account, which the summary says. It is ""
+when the two are the same, when the program is not elevated, and when the
+desktop's account cannot be read.
+*/
+func otherAccount() string {
+	if !privileged() {
+		return ""
+	}
+	mine, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return ""
+	}
+	desk, err := shellUser()
+	if err != nil || windows.EqualSid(mine.User.Sid, desk) {
+		return ""
+	}
+	name, domain, _, err := mine.User.Sid.LookupAccount("")
+	if err != nil {
+		return ""
+	}
+	return domain + `\` + name
+}
+
+// shellUser is the account of the desktop's shell: the process that owns
+// the window Windows calls the shell's.
+func shellUser() (*windows.SID, error) {
+	shell, _, _ := user32.NewProc("GetShellWindow").Call()
+	if shell == 0 {
+		return nil, windows.ERROR_NOT_FOUND
+	}
+	var pid uint32
+	if _, err := windows.GetWindowThreadProcessId(windows.HWND(shell), &pid); err != nil {
+		return nil, err //nolint:wrapcheck // read by one caller, which only asks whether it worked
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // as above
+	}
+	defer func() { _ = windows.CloseHandle(process) }()
+	var token windows.Token
+	if err := windows.OpenProcessToken(process, windows.TOKEN_QUERY, &token); err != nil {
+		return nil, err //nolint:wrapcheck // as above
+	}
+	defer func() { _ = token.Close() }()
+	u, err := token.GetTokenUser()
+	if err != nil {
+		return nil, err //nolint:wrapcheck // as above
+	}
+	return u.User.Sid.Copy()
+}

@@ -153,17 +153,22 @@ started it:
   there.
 - **Over SSH or as a service** there is no desktop, and the installer runs
   on the command line and asks nothing.
-- **As an administrator** (an elevated console, or "Run as administrator")
-  the installer runs on the command line, and `--gui` is refused: the
-  installer's window does not run with an administrator's rights.
+- **As an administrator** ("Run as administrator", or started from a
+  program that is elevated) the installer chooses the same way: the wizard
+  opens, and an elevated console gets the command line. It then makes its
+  changes itself, with no helper and no prompt. The program it starts from
+  the finish page is started through Explorer, as the person at the
+  desktop and not as an administrator. Where the installer runs as another
+  account than the desktop's, because a person gave another account's name
+  and password, a per-user install goes to that account, and the summary
+  page names it. This is Windows only: on Linux no window runs as root.
 
-The uninstaller chooses the same way, with one difference. The Uninstall
-button in Settings > Apps opens its window, which asks once. For an install
-for everyone, Settings starts the uninstaller as an administrator, after
-its own UAC prompt, and the uninstaller's window opens all the same: it is
-the one window of fynstall that runs with an administrator's rights. It
-then removes the install itself, with no helper and no second prompt. From
-an administrator's console the uninstaller still runs on the command line.
+The uninstaller chooses the same way. The Uninstall button in Settings >
+Apps opens its window, which asks once. For an install for everyone,
+Settings starts the uninstaller as an administrator, after its own UAC
+prompt, and the uninstaller's window opens all the same. It then removes
+the install itself, with no helper and no second prompt. From an
+administrator's console the uninstaller runs on the command line.
 
 `fynstall build --windowed` makes the installer with the wizard, and its
 uninstaller, programs with a window. They have no console on any Windows,

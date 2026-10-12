@@ -54,6 +54,15 @@ type Env struct {
 	OwnConsole bool
 }
 
+// elevated and runsAs are privileged and otherAccount, as variables, so a
+// test answers for an administrator it is not.
+//
+//nolint:gochecknoglobals // replaced by tests
+var (
+	elevated = privileged
+	runsAs   = otherAccount
+)
+
 // modeFor chooses the front end for this process, and closes the console
 // that Windows made for a program which then shows a window.
 func (e Env) modeFor(in modeInput) (mode, error) {
