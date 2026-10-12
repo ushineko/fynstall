@@ -1,0 +1,25 @@
+# The extension example (spec 003). Run `make keyed` first: it builds the
+# program into bin/.
+app:
+  id: io.ushineko.keyed
+  name: Keyed
+  version: 0.1.0
+  publisher: ushineko
+
+payload:
+  - src: bin/keyed{exe}
+    dst: bin/keyed{exe}
+
+parameters:
+  # Set by the sign-in page of the extension, so the Settings page has no
+  # field for it. On the command line: --account=…, or the page asks.
+  - name: account
+    label: Account
+    required: true
+  # Where the hooks leave a line each time they run, so a test can see them.
+  - name: marker-dir
+    label: Directory for the hooks' marks
+
+# The Go package, in this repository, that fynstall links into the installer
+# and the uninstaller.
+extension: ./installer

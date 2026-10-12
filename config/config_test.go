@@ -306,3 +306,60 @@ func TestADesktopEntryIsMatchedToItsWindowByItsID(t *testing.T) {
 	require.Equal(t, "io.example.hello", c.Integration.Desktop[0].StartupWMClass, "Fyne's window class is the app ID")
 	require.Empty(t, c.Integration.Desktop[1].StartupWMClass, "a terminal program has no window of its own")
 }
+
+// Spec 003 R1. The extension is a directory of Go files inside a Go module;
+// each way it is not is an error at the key's line. One that is, is found
+// with its module and its import path, and with the fynstall its go.mod
+// requires.
+func TestAnExtensionIsAPackageInsideAModule(t *testing.T) {
+	p := write(t, valid+"extension: ./installer\n")
+	_, err := Load(p)
+	var errs Errors
+	require.ErrorAs(t, err, &errs)
+	require.Len(t, errs, 1)
+	require.Equal(t, 8, errs[0].Line)
+	require.Equal(t, "extension", errs[0].Field)
+	require.Contains(t, errs[0].Msg, "does not exist")
+
+	dir := filepath.Dir(p)
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "installer"), 0o750))
+	_, err = Load(p)
+	require.ErrorContains(t, err, "holds no Go files")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "installer", "installer.go"), []byte("package installer\n"), 0o600))
+	_, err = Load(p)
+	require.ErrorContains(t, err, "not inside a Go module")
+
+	gomod := "module example.test/hello\n\ngo 1.26.0\n\nrequire (\n\tgithub.com/ushineko/fynstall v0.2.0\n)\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o600))
+	c, err := Load(p)
+	require.NoError(t, err)
+	x, err := FindExtension(c)
+	require.NoError(t, err)
+	require.Equal(t, "example.test/hello", x.ModulePath)
+	require.Equal(t, "example.test/hello/installer", x.ImportPath)
+	require.Equal(t, dir, x.ModuleDir)
+	require.Equal(t, "0.2.0", x.Requires)
+	require.False(t, x.Replaced)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod+"\nreplace github.com/ushineko/fynstall => ../fynstall\n"), 0o600))
+	x, err = FindExtension(c)
+	require.NoError(t, err)
+	require.True(t, x.Replaced, "a module developed beside a fynstall checkout")
+
+	none, err := FindExtension(&Config{})
+	require.NoError(t, err)
+	require.Nil(t, none, "a config without the key has no extension")
+}
+
+// Spec 005. autostart is a key of a launcher entry; an entry that runs in a
+// terminal cannot have it.
+func TestAnEntryInATerminalCannotStartAtLogin(t *testing.T) {
+	entry := "integration:\n  desktop:\n    - name: Hello\n      exec: bin/hello\n      autostart: true\n"
+	c, err := Load(write(t, valid+entry))
+	require.NoError(t, err)
+	require.True(t, c.Integration.Desktop[0].Autostart)
+
+	_, err = Load(write(t, valid+entry+"      terminal: true\n"))
+	require.ErrorContains(t, err, "cannot start at login")
+}

@@ -80,10 +80,16 @@ func readSideFile(dir string, m *manifest.Manifest) (map[string]string, error) {
 // upgrade, spec 002 D3a), a person (when ask is not nil), the default. A
 // required parameter left empty is an error that names its flag, unless it
 // is deferred: a secret the privileged helper reads back as root.
+//
+// A parameter that a page of the program's extension sets (paged) is not
+// asked for here and is not held to required: its page asks, and
+// requiredAfterPages checks it afterwards (spec 003). given says which
+// parameters had a value from a flag, the side file or the installed
+// version.
 func resolveParams(m *manifest.Manifest, flags, side, previous map[string]string, deferred []string,
-	ask func(p manifest.Parameter) (string, error),
-) (map[string]string, error) {
-	out := map[string]string{}
+	ask func(p manifest.Parameter) (string, error), paged ...string,
+) (out map[string]string, given map[string]bool, err error) {
+	out, given = map[string]string{}, map[string]bool{}
 	for _, p := range m.Parameters {
 		v, ok := flags[p.Name]
 		if !ok {
@@ -92,14 +98,21 @@ func resolveParams(m *manifest.Manifest, flags, side, previous map[string]string
 		if !ok {
 			v, ok = previous[p.Name]
 		}
+		given[p.Name] = ok
+		if slices.Contains(paged, p.Name) {
+			if !ok || v == "" {
+				v = p.Default
+			}
+			out[p.Name] = v
+			continue
+		}
 		if !ok && slices.Contains(deferred, p.Name) {
 			out[p.Name] = ""
 			continue
 		}
 		if !ok && ask != nil {
-			var err error
 			if v, err = ask(p); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			ok = v != ""
 		}
@@ -107,11 +120,11 @@ func resolveParams(m *manifest.Manifest, flags, side, previous map[string]string
 			v = p.Default
 		}
 		if p.Required && v == "" {
-			return nil, fmt.Errorf("%s is required: pass --%s=…, or set %s in %s", label(p), p.Name, p.Name, SideFile)
+			return nil, nil, fmt.Errorf("%s is required: pass --%s=…, or set %s in %s", label(p), p.Name, p.Name, SideFile)
 		}
 		out[p.Name] = v
 	}
-	return out, nil
+	return out, given, nil
 }
 
 // parameter asks a person for p's value. A secret is read without echo

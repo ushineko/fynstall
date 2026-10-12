@@ -84,6 +84,27 @@ func RegKey(v map[string]string, key string) string {
 // that has none.
 func StartMenu(v map[string]string) string { return v[keyStartMenu] }
 
+// StartupDir is the directory whose shortcuts Windows starts when a person
+// logs in: the person's own, or everyone's for an install in system scope.
+// It is "" on an OS that has none. It is inside the Start Menu, so a
+// shortcut in it is held to the same directory as a launcher's.
+func StartupDir(v map[string]string) string {
+	if v[keyStartMenu] == "" {
+		return ""
+	}
+	return v[keyStartMenu] + `\Startup`
+}
+
+// AutostartDir is the XDG autostart directory for v's scope: the
+// directory under {config} whose entries a desktop starts at login. For a
+// system install {config} is /etc, and the directory is /etc/xdg/autostart.
+func AutostartDir(v map[string]string) string {
+	if System(v) {
+		return v["config"] + "/xdg/autostart"
+	}
+	return v["config"] + "/autostart"
+}
+
 // PathList adds dir to the PATH-style list, and reports whether it was
 // missing. Entries are compared as Windows compares paths: without regard
 // to case or a trailing separator.

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/ushineko/fynstall/engine"
+	"github.com/ushineko/fynstall/extension"
 	"github.com/ushineko/fynstall/internal/version"
 	"github.com/ushineko/fynstall/manifest"
 	"github.com/ushineko/fynstall/platform"
@@ -27,6 +28,12 @@ removes it (R9e). Started from the desktop, it shows its problems in a
 window, never only on stderr, which nobody sees there.
 */
 func Uninstall(args []string, app manifest.App, e Env) int {
+	return UninstallWith(args, app, nil, e)
+}
+
+// UninstallWith is Uninstall for a program with installer code of its own
+// (spec 003): ext is the extension its uninstaller was built with, or nil.
+func UninstallWith(args []string, app manifest.App, ext *extension.Extension, e Env) int {
 	var yes, quiet, keepData, verbose, gui, cli, removeLeftovers bool
 	fl := newFlags("uninstall", e)
 	fl.BoolVar(&yes, "yes", false, "in the window, skip the question (the command line never asks)")
@@ -52,7 +59,7 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 		if err != nil {
 			return newHelperOut(e.Out).fail(err)
 		}
-		return applyUninstall(r, removeLeftovers, why, e)
+		return applyUninstall(r, removeLeftovers, why, e, ext)
 	}
 	if quiet {
 		yes = true
@@ -93,11 +100,11 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 		return problem(err.Error())
 	}
 	if md == modeGUI {
-		return uninstallGUI(r, yes, e.Getenv)
+		return uninstallGUI(r, yes, e.Getenv, ext)
 	}
 
 	if needsElevation(r.Scope, e.Getenv) {
-		return uninstallElevated(r, removeLeftovers, quiet, verbose, why, e)
+		return uninstallElevated(r, removeLeftovers, quiet, verbose, why, e, ext)
 	}
 	unlock, err := engine.Lock(r.App.ID, r.Scope, e.Getenv)
 	if err != nil {
@@ -113,12 +120,30 @@ func Uninstall(args []string, app manifest.App, e Env) int {
 			_, _ = fmt.Fprintf(e.Out, "Before removing anything, it runs %s\n", commandLine(h.Exec, h.Args))
 		}
 	}
+	if !quiet {
+		for _, line := range uninstallHookLines(ext, r.App.Name) {
+			_, _ = fmt.Fprintln(e.Out, line)
+		}
+	}
+	xlog := terminalLog(e)
+	if quiet {
+		xlog = terminalLog(Env{Out: io.Discard, Err: e.Err})
+	}
+	xc := uninstallContext(r, why, xlog)
+	if err := beforeUninstall(context.Background(), ext, xc); err != nil {
+		_, _ = fmt.Fprintf(e.Err, "%v\n", err)
+		return exitFail
+	}
 	left, err := engine.Uninstall(r, why, report)
 	if err != nil {
 		_, _ = fmt.Fprintf(e.Err, "%v\nRun the uninstaller again to retry; its record is %s.\n", err, engine.ReceiptPath(r.Root))
 		return exitFail
 	}
 	code := exitOK
+	if err := afterUninstall(context.Background(), ext, xc); err != nil {
+		_, _ = fmt.Fprintf(e.Err, "%v\n", err)
+		code = exitFail
+	}
 	if removeLeftovers && len(left) > 0 {
 		if err := engine.RemoveLeftovers(r, left, report); err != nil {
 			_, _ = fmt.Fprintf(e.Err, "uninstall: %v\n", err)
@@ -154,7 +179,7 @@ func ownReceipt() (*engine.Receipt, error) {
 // uninstallElevated is the command-line uninstall of a system install: the
 // removal runs in a helper as root, under sudo. The leftovers are listed,
 // or removed with --remove-leftovers, as in a per-user uninstall.
-func uninstallElevated(r *engine.Receipt, removeLeftovers, quiet, verbose bool, why engine.Reason, e Env) int {
+func uninstallElevated(r *engine.Receipt, removeLeftovers, quiet, verbose bool, why engine.Reason, e Env, ext *extension.Extension) int {
 	report := reporter(e, verbose)
 	if quiet {
 		report = reporter(Env{Out: io.Discard, Err: e.Err}, false)
@@ -162,6 +187,9 @@ func uninstallElevated(r *engine.Receipt, removeLeftovers, quiet, verbose bool, 
 		_, _ = fmt.Fprintln(e.Out, "This install is for everyone on this computer, so removing it needs an administrator.")
 		for _, h := range r.Hooks {
 			_, _ = fmt.Fprintf(e.Out, "Before removing anything, it runs %s\n", commandLine(h.Exec, h.Args))
+		}
+		for _, line := range uninstallHookLines(ext, r.App.Name) {
+			_, _ = fmt.Fprintln(e.Out, line)
 		}
 	}
 	args := []string{"--apply-uninstall"}

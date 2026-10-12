@@ -44,6 +44,7 @@ func Install(args []string, p Payload, e Env) int {
 	fl.StringVar(&f.dir, "dir", "", "install directory (default from the installer)")
 	fl.StringVar(&f.scope, "scope", "", "install scope: user, or system for everyone on this computer")
 	applyPlanFile := fl.String("apply-plan", "", "used by the installer itself: apply the plan in this file as root")
+	checkExt := fl.Bool("check-extension", false, "used by fynstall build: check the program's own installer code and exit")
 	paramValues := paramFlags(fl, m)
 	if m.Compat == CompatNSIS {
 		if args, err = nsisArgs(args, m); err != nil {
@@ -71,6 +72,15 @@ func Install(args []string, p Payload, e Env) int {
 		// went wrong. This cannot tell which machine it runs on: under
 		// emulation GOARCH is the binary's, not the host's.
 		_, _ = fmt.Fprintf(e.Err, "This installer's payload is for %s, but the installer was built for %s. Rebuild it.\n", m.Target, built)
+		return exitFail
+	}
+	if *checkExt {
+		return checkExtension(m, p.Extension, e)
+	}
+	if err := p.Extension.Check(declared(m)); err != nil {
+		// The builder checks this on every build, so only an installer
+		// built around it gets here.
+		_, _ = fmt.Fprintf(e.Err, "installer: its own installer code breaks the rules: %v\n", err)
 		return exitFail
 	}
 	if *applyPlanFile != "" {
@@ -155,7 +165,26 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 			deferred = nil
 		}
 	}
-	params, err := resolveParams(m, f.params, side, previous, deferred, prompt)
+	ext := p.Extension
+	params, given, err := resolveParams(m, f.params, side, previous, deferred, prompt, ext.Sets()...)
+	if err != nil {
+		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
+		return exitUsage
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	// The program's own pages, before the plan is made from what they set
+	// (spec 003). root is "" until the plan has the directory.
+	root := ""
+	xc := installContext(m, fixed(f.scope), func() string { return root }, params, terminalLog(e))
+	var pageAsk *asker
+	if prompt != nil {
+		pageAsk = ask
+	}
+	err = cliPages(ctx, ext, m, xc, given, pageAsk)
+	if err == nil {
+		err = requiredAfterPages(m, ext, params)
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(e.Err, "installer: %v\n", err)
 		return exitUsage
@@ -196,7 +225,7 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 		_, _ = fmt.Fprintf(e.Out, "%s: the uninstaller that came with %s removes it first, then this version installs.\n",
 			replacementText(m, old.receipt.App.Version), old.receipt.App.Version)
 	}
-	printPlan(e, plan, f.dryRun)
+	printPlan(e, plan, f.dryRun, installHookLines(ext, m.App.Name)...)
 	if f.dryRun {
 		return exitOK
 	}
@@ -215,9 +244,16 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 	report := reporter(e, f.verbose)
+	root = plan.Root
+	// For an install for everyone the hooks run in the helper, where the
+	// changes are made (spec 003 R6).
+	if !elevate {
+		if err := beforeInstall(ctx, ext, xc); err != nil {
+			_, _ = fmt.Fprintf(e.Err, "%v\n", err)
+			return exitFail
+		}
+	}
 	if elevate {
 		_, _ = fmt.Fprintln(e.Out, "This install is for everyone on this computer, so it needs an administrator.")
 		if err := applyRequest(ctx, plan, false, e, report); err != nil {
@@ -232,6 +268,10 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 	} else if _, err := engine.Apply(ctx, plan, p.Files, p.Uninstaller, report); err != nil {
 		_, _ = fmt.Fprintf(e.Err, "Install failed, and the changes were undone: %v\n", err)
 		return exitFail
+	}
+	var hookErr error
+	if !elevate {
+		hookErr = afterInstall(ctx, ext, xc)
 	}
 	if plan.RefreshMenu {
 		refreshMenu(report)
@@ -249,6 +289,10 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 		if bin := filepath.Dir(plan.Links[0].Dst); !onPath(bin, e.Getenv("PATH")) {
 			_, _ = fmt.Fprintf(e.Out, "%s is not on your PATH, so the links in it are not found by name. Add it to PATH to run them that way.\n", bin)
 		}
+	}
+	if hookErr != nil {
+		_, _ = fmt.Fprintf(e.Err, "%v\n", hookErr)
+		return exitFail
 	}
 	return exitOK
 }
@@ -271,8 +315,9 @@ func onPath(dir, path string) bool {
 	return false
 }
 
-// printPlan states what the install will do; with all, every path.
-func printPlan(e Env, p *engine.Plan, all bool) {
+// printPlan states what the install will do; with all, every path. hooks
+// are the lines for the program's own installer code (spec 003 R7).
+func printPlan(e Env, p *engine.Plan, all bool, hooks ...string) {
 	var size int64
 	var replaced []string
 	for _, f := range p.Files {
@@ -299,9 +344,15 @@ func printPlan(e Env, p *engine.Plan, all bool) {
 	for _, l := range shellLines(p) {
 		_, _ = fmt.Fprintf(e.Out, "  %s\n", l)
 	}
+	for _, name := range p.Autostart {
+		_, _ = fmt.Fprintf(e.Out, "  starts   %s when you log in\n", name)
+	}
 	// Actions are always shown: a run action runs a payload program.
 	for _, a := range actionLines(p) {
 		_, _ = fmt.Fprintf(e.Out, "  %s\n", a)
+	}
+	for _, h := range hooks {
+		_, _ = fmt.Fprintf(e.Out, "  %s\n", h)
 	}
 	if !all {
 		return

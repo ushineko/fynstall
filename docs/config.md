@@ -28,6 +28,7 @@ the Windows Uninstall registry entry, have no keys of their own.
 - [uninstall](#uninstall)
 - [ui](#ui)
 - [cli](#cli)
+- [extension](#extension)
 - [targets](#targets)
 - [Placeholders](#placeholders)
 - [What an install writes](#what-an-install-writes)
@@ -177,6 +178,7 @@ shortcut named for the entry's `name`; it uses `exec`, `args` and `comment`.
 | `args` | no | Arguments after the program. |
 | `categories` | no | Launcher categories, such as `Utility`. |
 | `terminal` | no | `true` runs the program in a terminal. |
+| `autostart` | no | `true` starts the program when its user logs in. See below. |
 | `generic_name` | no | What kind of program it is, such as `Wallpaper manager`. |
 | `keywords` | no | Words a launcher's search matches. |
 | `startup_notify` | no | `true` when the program tells the desktop its window is up, so the launcher shows it is starting. Left out when unset. |
@@ -190,6 +192,15 @@ shows a generic icon. The `Icon` key of every entry is the app ID when
 
 The installer quotes `exec` and `args` as the Desktop Entry Specification
 requires, so an install directory with spaces in its path works.
+
+**Starting at login.** An entry with `autostart: true` starts when its user
+logs in. On Linux the installer writes the entry a second time, into the
+XDG autostart directory: `{config}/autostart` for a per-user install,
+`/etc/xdg/autostart` for an install for everyone. On Windows it adds a
+second shortcut, in the Startup folder of the Start Menu. The installer
+lists both in its plan, and the uninstaller removes them. An entry that
+runs in a terminal cannot start at login. A person turns the start off in
+the desktop's own settings; the uninstaller still removes the entry.
 
 After an install and after an uninstall, the installer runs `kbuildsycoca6`
 if it is on `PATH`, so KDE shows the change without a new login. Other
@@ -338,7 +349,8 @@ it.
 - A secret parameter cannot be an argument. Arguments show in the process
   list, and an `undo` is kept in the install's record. Pass a secret
   through a `config_file`.
-- `before_install` and `after_install` come with Go extensions (spec 003).
+- Code that runs before the install starts, or with the wizard's own
+  pages, is a Go [extension](#extension).
 
 **migrate** moves data that an older version kept elsewhere.
 
@@ -422,6 +434,18 @@ message. The key means the same on every platform, though only a caller on
 Windows is likely to use the switches.
 
 The uninstaller does not take `/S`. Run it with `--yes` or `--quiet`.
+
+## extension
+
+```yaml
+extension: ./installer
+```
+
+The directory of a Go package of the program's own, relative to
+`fynstall.yaml` and inside a Go module. The builder links the package into
+the installer and the uninstaller. It adds pages to the wizard, and runs
+code before and after an install and an uninstall, for what cannot be
+declared here. See [extensions.md](extensions.md).
 
 ## targets
 

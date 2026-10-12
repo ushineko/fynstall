@@ -102,6 +102,9 @@ type Plan struct {
 	Actions []PlannedAction
 	// Hooks are the uninstall hooks the receipt keeps.
 	Hooks []Hook
+	// Autostart names the launcher entries that start at login (spec
+	// 005), for a front end to say so.
+	Autostart []string
 	// RefreshMenu is true when the install adds launcher entries or icons,
 	// so the front end asks the desktop to read them again.
 	RefreshMenu bool
@@ -303,6 +306,19 @@ func (p *Plan) addIntegration(vars map[string]string) error {
 		dst := filepath.Join(data, filepath.FromSlash(platform.DesktopPath(d.ID)))
 		if err := p.addFile(PlannedFile{File: contentFile(d.ID+".desktop", b, 0o644), Dst: dst, Base: data, Source: FromContent, Content: b}); err != nil {
 			return err
+		}
+		if d.Autostart {
+			// The same entry, without the Uninstall action, where the
+			// desktop looks for what to start at login (spec 005).
+			auto := platform.RenderDesktop(d, p.inRoot(d.Exec), icon, "")
+			dir := filepath.FromSlash(platform.AutostartDir(vars))
+			if err := p.addFile(PlannedFile{
+				File: contentFile(d.ID+".desktop", auto, 0o644), Dst: filepath.Join(dir, d.ID+".desktop"),
+				Base: vars["config"], Source: FromContent, Content: auto,
+			}); err != nil {
+				return err
+			}
+			p.Autostart = append(p.Autostart, d.Name)
 		}
 	}
 	for _, l := range m.Links {

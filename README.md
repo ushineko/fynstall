@@ -67,7 +67,8 @@ changed checkout, says `dev`: build against a checkout with it,
 
 The config format is in [docs/config.md](docs/config.md), and what an install
 does on each platform, with the paths and elevation, in
-[docs/platforms.md](docs/platforms.md).
+[docs/platforms.md](docs/platforms.md). A program's own installer pages
+and hooks, in Go, are in [docs/extensions.md](docs/extensions.md).
 
 ## What it will do
 
@@ -113,6 +114,28 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 MIT. See [LICENSE](LICENSE).
 
 ## Changelog
+
+### Unreleased
+
+- Extensions (spec 003): `extension: ./installer` names a Go package of the
+  program's own, which the builder links into the installer and the
+  uninstaller. It adds pages to the wizard, each with a command-line path,
+  and runs code before and after an install and an uninstall. The build
+  checks that the package builds without the wizard, that it is written
+  for this fynstall, and that every page has a window. `examples/keyed`
+  shows one; [docs/extensions.md](docs/extensions.md) has the rules. An
+  extension's own licence text is not in yet
+  ([#11](https://github.com/ushineko/fynstall/issues/11)).
+
+- Starting at login (spec 005): `autostart: true` on a launcher entry starts
+  its program when its user logs in: an XDG autostart entry on Linux, a
+  shortcut in the Startup folder on Windows. The plan lists it and the
+  uninstaller removes it
+  ([#35](https://github.com/ushineko/fynstall/issues/35)).
+
+- "Launch now" after a repair, an upgrade or a downgrade starts the program.
+  The wizard took any existing install for one it could not replace, and
+  ended without launching.
 
 ### 0.1.1 (2026-10-11)
 

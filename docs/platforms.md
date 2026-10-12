@@ -19,6 +19,7 @@ spec 001 phase 7; the Windows section says what is there. macOS is later.
 | Install index | `{data}/fynstall/installs/<id>.json` | `/var/lib/fynstall/installs/<id>.json` |
 | Launcher entries | `{data}/applications` | `/usr/local/share/applications` |
 | Icons | `{data}/icons/hicolor/<size>/apps` | `/usr/local/share/icons/hicolor/<size>/apps` |
+| Entries that start at login | `{config}/autostart` | `/etc/xdg/autostart` |
 | Services | systemd user units in `{config}/systemd/user`, started at login | system units in `/etc/systemd/system`, started at boot |
 | Install lock | `$XDG_RUNTIME_DIR/fynstall` | `/run/fynstall` |
 
@@ -76,6 +77,7 @@ phase 7.
 | Install index | `{data}\fynstall\installs\<id>.json` | `%ProgramData%\fynstall\installs\<id>.json` |
 | Uninstaller | `<install directory>\uninstall.exe` | the same |
 | Launcher entries | `{config}\Microsoft\Windows\Start Menu\Programs\<name>.lnk` | the Start Menu of all users, under `%ProgramData%` |
+| Entries that start at login | `{config}\Microsoft\Windows\Start Menu\Programs\Startup\<name>.lnk` | the Startup folder of all users, under `%ProgramData%` |
 | Icon | `<install directory>\.fynstall\app.ico` | the same |
 | Links | the directory of each link's program, on the user's `PATH` | the same, on the computer's `PATH` |
 | Record for Settings > Apps | `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<id>` | the same key under `HKLM` |
