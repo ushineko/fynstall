@@ -1,6 +1,6 @@
 # fynstall
 
-**Version**: 0.2.0
+**Version**: 0.2.1
 
 An installer framework for Go and [Fyne](https://fyne.io) programs. You
 describe a program in `fynstall.yaml`, and `fynstall build` produces one
@@ -58,8 +58,8 @@ it does not ask: running it is the decision. A newer installer's
 over to that same installed file.
 
 An installer is pinned to the version of the fynstall that built it. A
-released builder is one made from a release's tag, such as `v0.2.0`, in
-either of two ways: `go install github.com/ushineko/fynstall/cmd/fynstall@v0.2.0`,
+released builder is one made from a release's tag, such as `v0.2.1`, in
+either of two ways: `go install github.com/ushineko/fynstall/cmd/fynstall@v0.2.1`,
 or `make build` in a checkout that sits on the tag with nothing modified.
 It needs no more than the config. A builder made any other way, such as
 `go install` of a commit or of `@latest` before a release, or a build of a
@@ -116,7 +116,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
-### Unreleased
+### 0.2.1 (2026-10-12)
 
 - The wizard opens for an installer run as an administrator, on Windows
   (spec 007): started with "Run as administrator" it fell back to a command
