@@ -2,7 +2,7 @@
 
 **Issue**: [#11](https://github.com/ushineko/fynstall/issues/11)
 
-## Status: INCOMPLETE
+## Status: COMPLETE — shipped in 0.2.0; see docs/extensions.md
 
 The design was agreed on 2026-10-09. It was brought forward on 2026-10-11
 for hayami, whose installer checks for LibreHardwareMonitor and offers to

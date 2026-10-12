@@ -1,6 +1,6 @@
 # fynstall
 
-**Version**: 0.2.1
+**Version**: 0.2.2
 
 An installer framework for Go and [Fyne](https://fyne.io) programs. You
 describe a program in `fynstall.yaml`, and `fynstall build` produces one
@@ -38,12 +38,20 @@ accepts the defaults, `--dry-run` lists every change and makes none, and
 `--dir` chooses the directory.
 
 **Two variants.** The full installer has the wizard, so it needs cgo to
-build, builds only for the machine that builds it, and needs the graphics
-libraries to start. On a machine without them, such as a server or a slim
+build — for this machine with its own C compiler, and for another with a
+compiler that targets it — and it needs the graphics libraries to start. On a machine without them, such as a server or a slim
 container, it does not start at all: the dynamic loader stops before the
 installer can say anything (`libGL.so.1: cannot open shared object file`).
 Ship the `-cli-installer` for those machines. It has no Fyne and no cgo,
 builds for every target, and runs anywhere.
+
+**Cross-building the wizard.** A target that is not this machine needs a C
+compiler that targets it: `x86_64-w64-mingw32-gcc` for `windows/amd64`,
+`aarch64-linux-gnu-gcc` for `linux/arm64`. With one on `PATH` the build needs
+nothing else — Fyne's Windows surface is `-lgdi32` and `-lopengl32`, and GLFW
+vendors its own mingw headers, so there is no SDK to find. Set `CC` (and
+`CXX`) to use a different toolchain. Without a compiler the build stops and
+names the package to install, and `--cli-only` needs none.
 
 **Progress.** The wizard shows a bar, the count of files and bytes, and the
 file being written; on a terminal the command line keeps one progress line
@@ -115,6 +123,21 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 MIT. See [LICENSE](LICENSE).
 
 ## Changelog
+
+### 0.2.2 (2026-10-12)
+
+- The wizard cross-builds, with a C compiler for its target. A full
+  installer used to be built only for the machine that built it, which made
+  a Windows installer with a window something only Windows could produce.
+  That was a guess about cgo and not a fact about it: Go sets `GOOS`,
+  `GOARCH` and `CC` per build, Fyne's Windows surface is `-lgdi32` and
+  `-lopengl32`, and GLFW vendors its own mingw headers, so a Linux machine
+  with `mingw-w64` builds the Windows wizard with no SDK and no Windows
+  machine. The build now looks for a compiler that targets the target —
+  `x86_64-w64-mingw32-gcc` for `windows/amd64`,
+  `aarch64-linux-gnu-gcc` for `linux/arm64`, or whatever `CC` names — and
+  refuses only when there is none, naming the compiler and the package that
+  carries it. `--cli-only` needs none, as before.
 
 ### 0.2.1 (2026-10-12)
 
