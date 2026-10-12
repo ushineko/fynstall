@@ -451,9 +451,11 @@ declared here. See [extensions.md](extensions.md).
 
 A list of `os/arch` pairs. Without it, and without `--target`, the build is
 for the machine that runs it. The known targets are `linux/amd64`,
-`linux/arm64` and `windows/amd64`. An installer with the wizard builds only
-on its own platform, with a C compiler; `--cli-only` builds every target
-from any of them.
+`linux/arm64` and `windows/amd64`. An installer with the wizard needs a C
+compiler for its target: this machine's for this machine, and a cross
+compiler such as `x86_64-w64-mingw32-gcc` for another, which the build finds
+on `PATH` or takes from `CC`. `--cli-only` needs no compiler at all and
+builds every target from any of them.
 
 The build makes one installer per target, each with the payload for its
 target, and records the target in the installer's manifest.

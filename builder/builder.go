@@ -110,10 +110,19 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 		variants = append(variants, false)
 	}
 	host := runtime.GOOS + "/" + runtime.GOARCH
+	/*
+		The wizard can be built for another machine, when there is a compiler
+		for it.
+
+		This used to refuse every target but the host. The refusal was a guess
+		about cgo rather than a fact about it: Go sets GOOS, GOARCH and CC per
+		build, and Fyne's Windows surface needs no SDK, so a Linux machine with
+		mingw-w64 builds the Windows wizard. See crosscompile.go.
+	*/
 	if variants[0] {
 		for _, t := range targets {
-			if t != host {
-				return nil, fmt.Errorf("target %s: the wizard needs cgo, so a full installer builds only for this machine (%s); build other targets with --cli-only", t, host)
+			if err := checkCrossCompiler(t, o.Env); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -337,6 +346,22 @@ func goCmd(ctx context.Context, o Options, dir, goos, goarch string, gui bool, a
 		cgo = "CGO_ENABLED=1"
 	}
 	cmd.Env = append(cmd.Env, cgo, "GOOS="+goos, "GOARCH="+goarch, "GOWORK=off", "GOFLAGS=-mod=mod")
+	/*
+		A cross-built wizard is given its compiler.
+
+		Only for the variant that uses cgo, and only when the target is not
+		this machine: setting CC for a host build would override a caller's
+		own toolchain for no reason, and setting it for the CLI variant would
+		name a compiler that build never runs.
+	*/
+	if gui {
+		if cc, cxx, needed := crossCompiler(goos+"/"+goarch, o.Env); needed && cc != "" {
+			cmd.Env = append(cmd.Env, "CC="+cc)
+			if cxx != "" {
+				cmd.Env = append(cmd.Env, "CXX="+cxx)
+			}
+		}
+	}
 	var stderr bytes.Buffer
 	cmd.Stdout = o.Log
 	cmd.Stderr = io.MultiWriter(o.Log, &stderr)
