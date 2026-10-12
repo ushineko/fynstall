@@ -116,6 +116,15 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
+### Unreleased
+
+- The wizard opens for an installer run as an administrator, on Windows
+  (spec 007): started with "Run as administrator" it fell back to a command
+  line with no terminal, and one built `--windowed` showed nothing. It now
+  opens, makes its changes itself, and starts the program from the finish
+  page as the person at the desktop. On Linux no window runs as root, as
+  before ([#43](https://github.com/ushineko/fynstall/issues/43)).
+
 ### 0.2.0 (2026-10-11)
 
 - Extensions (spec 003): `extension: ./installer` names a Go package of the

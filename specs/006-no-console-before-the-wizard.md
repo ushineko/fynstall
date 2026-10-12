@@ -70,9 +70,11 @@ command line with `/S`, and they print nothing.
       and 2 for a flag it does not have).
 - [ ] Desk check: the default installer, double-clicked on Windows 11 24H2
       or later: no console is seen.
-- [ ] Desk check: a `--windowed` installer, double-clicked: no console is
-      seen. From `cmd` and from PowerShell, `--dry-run --yes` prints the
-      plan in that console.
+- [x] Desk check: a `--windowed` installer, double-clicked: no console is
+      seen (hayami 0.9.10's installer from its release, an upgrade,
+      2026-10-11, Windows 11 build 26200).
+- [ ] Desk check: a `--windowed` installer typed into `cmd` and into
+      PowerShell: `--dry-run --yes` prints the plan in that console.
 - [ ] Desk check: the uninstaller of a `--windowed` install, from
       Settings > Apps: no console is seen.
 - [ ] A `--windowed` installer on a Windows older than 11 24H2. No such

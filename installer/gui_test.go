@@ -278,6 +278,9 @@ func TestLeftoversDetailListsAtMostFiftyByName(t *testing.T) {
 // each choice has its own location page and default (spec 001 phase 5).
 func TestTheWizardAsksWhoTheInstallIsFor(t *testing.T) {
 	m, p, e, _ := guiFixture(t)
+	was := elevated
+	elevated = func() bool { return false }
+	t.Cleanup(func() { elevated = was })
 	m.Parameters, m.ConfigFiles, m.Licence = nil, nil, ""
 	m.Scopes = []string{"user", "system"}
 	m.Dirs["system"] = "{programs}/{id}"
@@ -305,6 +308,9 @@ func TestTheWizardAsksWhoTheInstallIsFor(t *testing.T) {
 	require.Equal(t, "Ready", w.Current().Title())
 	require.Equal(t, "system", g.plan.Scope)
 	require.Contains(t, g.welcome(), "asks for an administrator once")
+	// Run as an administrator already, it has nothing more to ask for (spec 007).
+	elevated = func() bool { return true }
+	require.NotContains(t, g.welcome(), "asks for an administrator")
 }
 
 // The uninstall window of a system install keeps its helper waiting while
@@ -431,21 +437,33 @@ func TestTheWizardSaysWhatItDoesToAnInstalledVersion(t *testing.T) {
 // second case.
 func TestTheFinishPageLaunchesAfterAReplacement(t *testing.T) {
 	var started []string
-	old := start
-	start = func(path string, _ bool, _ ...string) { started = append(started, path) }
-	t.Cleanup(func() { start = old })
+	old, was := start, elevated
+	start = func(path string, _ bool, args ...string) { started = append(append(started, path), args...) }
+	elevated = func() bool { return false }
+	t.Cleanup(func() { start, elevated = old, was })
 
 	m := &manifest.Manifest{Launch: "bin/hello"}
 	root := filepath.Join("x", "hello")
 	ix := &engine.Index{Uninstaller: filepath.Join(root, "uninstall")}
 	done := wizard.Result{Outcome: wizard.Finished, Checks: map[string]bool{LaunchNow: true, RunUninstaller: true}}
 
-	replaced := &installWizard{m: m, existing: ix, plan: &engine.Plan{Root: root}, launch: widget.NewCheck(LaunchNow, nil)}
+	replaced := &installWizard{m: m, existing: ix, plan: &engine.Plan{Root: root}, launch: widget.NewCheck(LaunchNow, nil),
+		e: Env{Getenv: func(string) string { return "" }}}
 	require.Equal(t, exitOK, replaced.after(done))
 	require.Equal(t, []string{filepath.Join(root, "bin", "hello")}, started, "a replacement launches the program")
 
 	started = nil
 	stuck := &installWizard{m: m, existing: ix, uninst: widget.NewCheck(RunUninstaller, nil)}
 	require.Equal(t, exitOK, stuck.after(done))
-	require.Equal(t, []string{ix.Uninstaller}, started, "the pages that replace nothing start the old uninstaller")
+	require.Equal(t, []string{ix.Uninstaller, "--gui"}, started, "the pages that replace nothing start the old uninstaller")
+
+	// An installer that runs as an administrator does not start the program
+	// as one: on Windows it asks Explorer to (spec 007).
+	if runtime.GOOS == "windows" {
+		started = nil
+		elevated = func() bool { return true }
+		replaced.e.Getenv = func(k string) string { return map[string]string{"SystemRoot": `X:\Win`}[k] }
+		require.Equal(t, exitOK, replaced.after(done))
+		require.Equal(t, []string{`X:\Win\explorer.exe`, filepath.Join(root, "bin", "hello")}, started)
+	}
 }

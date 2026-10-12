@@ -91,7 +91,7 @@ func Install(args []string, p Payload, e Env) int {
 	}
 	md, err := e.modeFor(modeInput{
 		wantGUI: f.gui, wantCLI: f.cli,
-		cliOnly: f.yes || f.dryRun || f.uninstall || f.forceReceipt,
+		cliOnly: f.yes || f.dryRun || f.uninstall || f.forceReceipt, rootWindow: windowAsAdmin,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintln(e.Err, err)

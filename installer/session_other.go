@@ -27,10 +27,17 @@ func releaseConsole() {}
 // was started in (see the Windows file).
 func borrowConsole() {}
 
-// uninstallWindowAsAdmin is false: nothing here starts an uninstaller as
-// root with a window to show, and a window as root often cannot open at all
-// (see the Windows file).
-const uninstallWindowAsAdmin = false
+// windowAsAdmin is false: nothing here starts an installer or an
+// uninstaller as root with a window to show, and a window as root often
+// cannot open at all (see the Windows file).
+const windowAsAdmin = false
+
+// desktopCommand is the command that starts the program at path: the path.
+// No window runs as root here, so there is nobody else to start it as.
+func desktopCommand(path string, _ func(string) string) (string, []string) { return path, nil }
+
+// otherAccount is "": see the Windows file.
+func otherAccount() string { return "" }
 
 // privileged reports whether the process runs as root, which the window
 // never does (spec 001 R13).
