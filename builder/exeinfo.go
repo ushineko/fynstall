@@ -20,14 +20,16 @@ const (
 // Windows target, keyed by its file name: the version resource and the
 // application manifest (spec 002 L7), and the icon when the app has one.
 // kind is installer or uninstaller, and file is what the program is called;
-// both go into the version resource. Another OS gets nothing.
-func exeResources(goos, goarch string, app manifest.App, ico []byte, kind, file string) (map[string][]byte, error) {
+// both go into the version resource. wizard is true for a program that can
+// show the wizard, which asks Windows for no console of its own. Another OS
+// gets nothing.
+func exeResources(goos, goarch string, app manifest.App, ico []byte, kind, file string, wizard bool) (map[string][]byte, error) {
 	if goos != "windows" {
 		return nil, nil
 	}
 	list := []resource{
 		{kind: resVersion, id: 1, data: versionResource(app, kind, file)},
-		{kind: resManifest, id: 1, data: exeManifest(app, kind)},
+		{kind: resManifest, id: 1, data: exeManifest(app, kind, wizard)},
 	}
 	if ico != nil {
 		icons, err := iconResources(ico)
@@ -147,8 +149,26 @@ func verNode(key string, text bool, value []byte, children ...[]byte) []byte {
 // elevate it. Without the statement, Windows guesses from a file's name.
 // The program knows Windows 10 and 11, so Windows tells it the real version
 // (spec 002 L2). And the name and version identify it.
-func exeManifest(app manifest.App, kind string) []byte {
+//
+// A program with the wizard also asks for no console of its own
+// (consoleAllocationPolicy, Windows 11 24H2 and later; spec 006). It is a
+// console program unless it was built --windowed, and Windows makes a
+// console for one started from the desktop, which shows for a moment before
+// the wizard closes it. With the policy it is given none there, and still
+// shares the terminal it is typed into. An older Windows ignores the line.
+// A program without the wizard keeps its console: started from the desktop,
+// that is the only place it can say anything.
+func exeManifest(app manifest.App, kind string, wizard bool) []byte {
 	n := versionNumbers(app.Version)
+	console := ""
+	if wizard {
+		console = `
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <consoleAllocationPolicy xmlns="http://schemas.microsoft.com/SMI/2024/WindowsSettings">detached</consoleAllocationPolicy>
+    </windowsSettings>
+  </application>`
+	}
 	return fmt.Appendf(nil, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity type="win32" name="%s.%s" version="%d.%d.%d.%d"/>
@@ -163,7 +183,7 @@ func exeManifest(app manifest.App, kind string) []byte {
     <application>
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
     </application>
-  </compatibility>
+  </compatibility>%s
 </assembly>
-`, app.ID, kind, n[0], n[1], n[2], n[3])
+`, app.ID, kind, n[0], n[1], n[2], n[3], console)
 }

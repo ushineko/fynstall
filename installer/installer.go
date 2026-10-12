@@ -70,6 +70,7 @@ func (e Env) modeFor(in modeInput) (mode, error) {
 
 // Main runs the installer with the process's arguments and exits.
 func Main(p Payload) {
+	borrowConsole()
 	args, e := helperChannel(os.Args[1:], processEnv())
 	os.Exit(Install(args, p, e))
 }
@@ -78,6 +79,7 @@ func Main(p Payload) {
 // app is the program it belongs to, compiled in by the builder, and ext its
 // own installer code, when it has any (spec 003).
 func UninstallMain(app manifest.App, ext ...*extension.Extension) {
+	borrowConsole()
 	args, e := helperChannel(os.Args[1:], processEnv())
 	var x *extension.Extension
 	if len(ext) > 0 {

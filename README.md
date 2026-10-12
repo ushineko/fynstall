@@ -27,6 +27,7 @@ fynstall validate                # lists every problem, with line numbers
 fynstall build                   # dist/<name>-<version>-<os>-<arch>-installer, with the wizard
 fynstall build --with-cli-only   # and dist/…-cli-installer, without it
 fynstall build --cli-only        # the CLI variant only, for any target
+fynstall build --windowed        # on Windows, the wizard's installer never has a console
 ```
 
 **The installer picks its front end.** Started from the desktop (no
@@ -136,6 +137,15 @@ MIT. See [LICENSE](LICENSE).
 - "Launch now" after a repair, an upgrade or a downgrade starts the program.
   The wizard took any existing install for one it could not replace, and
   ended without launching.
+
+- No console before the wizard on Windows (spec 006): started from the
+  desktop, the installer with the wizard and its uninstaller showed a
+  console for a moment. They now ask Windows for none, which Windows 11
+  24H2 and later honour. `fynstall build --windowed` makes them programs
+  with a window, with no console on any Windows: on a terminal such an
+  installer prints but asks nothing and is not waited for, and the
+  command-line-only installer is the one for a terminal
+  ([#40](https://github.com/ushineko/fynstall/issues/40)).
 
 ### 0.1.1 (2026-10-11)
 

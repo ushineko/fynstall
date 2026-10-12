@@ -197,7 +197,7 @@ func ReadVersion(t *testing.T, b []byte) (numbers [4]uint16, flags uint32, strs 
 func TestAProgramSaysWhatItIsAndAsksForNoMoreRights(t *testing.T) {
 	app := manifest.App{ID: "io.example.shell", Name: "Shell Example", Version: "1.2.3-rc.1+build5", Publisher: "Example Makers & Sons"}
 	ico := testIco(t)
-	res, err := exeResources("windows", "amd64", app, ico, "installer", "shell-installer.exe")
+	res, err := exeResources("windows", "amd64", app, ico, "installer", "shell-installer.exe", true)
 	require.NoError(t, err)
 	p := filepath.Join(t.TempDir(), sysoName("amd64"))
 	require.NoError(t, os.WriteFile(p, res[sysoName("amd64")], 0o600))
@@ -220,12 +220,24 @@ func TestAProgramSaysWhatItIsAndAsksForNoMoreRights(t *testing.T) {
 		Run struct {
 			Level string `xml:"level,attr"`
 		} `xml:"trustInfo>security>requestedPrivileges>requestedExecutionLevel"`
+		Console string `xml:"application>windowsSettings>consoleAllocationPolicy"`
 	}
 	require.NoError(t, xml.Unmarshal(got[[2]uint16{resManifest, 1}], &m))
 	require.Equal(t, "io.example.shell.installer", m.Identity.Name)
 	require.Equal(t, "1.2.3.0", m.Identity.Version)
 	require.Equal(t, "asInvoker", m.Run.Level, "the helper asks for an administrator, never the program itself")
+	require.Equal(t, "detached", m.Console, "started from the desktop, it is given no console to show before the wizard")
+	require.NotContains(t, string(exeManifest(app, "installer", false)), "consoleAllocationPolicy",
+		"an installer with no wizard keeps the console it prints on")
 	RequireIcon(t, ico, got)
+
+	// --windowed makes the program with the wizard one with a window, on
+	// Windows only, and never the command-line one (spec 006).
+	windowed := Options{Windowed: true}
+	require.Contains(t, linkFlags(windowed, "windows", true), "-H=windowsgui")
+	require.NotContains(t, linkFlags(windowed, "windows", false), "windowsgui")
+	require.NotContains(t, linkFlags(windowed, "linux", true), "windowsgui")
+	require.NotContains(t, linkFlags(Options{}, "windows", true), "windowsgui")
 
 	// No publisher and no icon: the string and the images are left out.
 	app.Publisher, app.Version = "", "70000.2.3"
@@ -236,7 +248,7 @@ func TestAProgramSaysWhatItIsAndAsksForNoMoreRights(t *testing.T) {
 	require.NotContains(t, strs, "CompanyName")
 	require.Equal(t, "70000.2.3", strs["FileVersion"], "the strings hold the version as written")
 
-	res, err = exeResources("linux", "amd64", app, nil, "installer", "x")
+	res, err = exeResources("linux", "amd64", app, nil, "installer", "x", true)
 	require.NoError(t, err)
 	require.Empty(t, res, "only a Windows program has resources")
 }

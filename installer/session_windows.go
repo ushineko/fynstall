@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"os"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -17,6 +18,7 @@ const (
 //nolint:gochecknoglobals // handles of system libraries, loaded on first use
 var (
 	procFreeConsole          = windows.NewLazySystemDLL("kernel32.dll").NewProc("FreeConsole")
+	procAttachConsole        = windows.NewLazySystemDLL("kernel32.dll").NewProc("AttachConsole")
 	user32                   = windows.NewLazySystemDLL("user32.dll")
 	procGetProcessWinStation = user32.NewProc("GetProcessWindowStation")
 	procGetUserObjectInfo    = user32.NewProc("GetUserObjectInformationW")
@@ -50,6 +52,41 @@ func ownConsole() bool { return platform.ConsoleProcesses() == 1 }
 // releaseConsole closes the console Windows made for this process, so no
 // console window stays open behind the wizard.
 func releaseConsole() { _, _, _ = procFreeConsole.Call() }
+
+/*
+borrowConsole gives a program with no console the console of whoever started
+it, to print on (spec 006). An installer built --windowed is a program with
+a window, so Windows gives it no console and nowhere to print: typed into a
+console with --dry-run or --help it would say nothing. It takes the
+console's output only, and only where it has none of its own: output sent to
+a file or a pipe goes there as before, and the keyboard stays the shell's,
+which does not wait for a program with a window. Started from the desktop
+there is no console to borrow, and nothing happens.
+*/
+func borrowConsole() {
+	if platform.ConsoleProcesses() != 0 {
+		return
+	}
+	const attachParentProcess = ^uintptr(0)
+	if ok, _, _ := procAttachConsole.Call(attachParentProcess); ok == 0 {
+		return
+	}
+	for _, std := range []**os.File{&os.Stdout, &os.Stderr} {
+		if usable(*std) {
+			continue
+		}
+		if f, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0); err == nil {
+			*std = f
+		}
+	}
+}
+
+// usable reports whether f is somewhere output can go: a file, a pipe or a
+// console. A program with a window that nothing redirected has none.
+func usable(f *os.File) bool {
+	t, err := windows.GetFileType(windows.Handle(f.Fd()))
+	return err == nil && t != windows.FILE_TYPE_UNKNOWN
+}
 
 // uninstallWindowAsAdmin is true: Settings > Apps starts the uninstaller of
 // an install for everyone as an administrator, with --gui, and there is no

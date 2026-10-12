@@ -9,6 +9,7 @@ package builder
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -39,6 +40,11 @@ type Options struct {
 	CLIOnly bool
 	// WithCLIOnly builds the CLI variant as well as the full one.
 	WithCLIOnly bool
+	// Windowed makes the full variant a program with a window on Windows,
+	// not a console program (spec 006): it never shows a console, and on a
+	// terminal it prints but asks nothing. Other platforms have one kind
+	// of program, and the CLI variant is always a console program.
+	Windowed bool
 	// RuntimePath, when set, is a local fynstall checkout the generated
 	// programs use through a replace directive, instead of a released
 	// version (R5).
@@ -92,6 +98,9 @@ func Build(ctx context.Context, o Options) ([]Artifact, error) {
 		if !slices.Contains(config.KnownTargets, t) {
 			return nil, fmt.Errorf("unknown target %q", t)
 		}
+	}
+	if o.Windowed && o.CLIOnly {
+		return nil, errors.New("--windowed is for the installer with the wizard, and --cli-only builds none")
 	}
 	var variants []bool
 	if !o.CLIOnly {
@@ -178,11 +187,11 @@ func buildTarget(ctx context.Context, o Options, mod map[string][]byte, ext *con
 	// On Windows the installer and the uninstaller each carry a version, a
 	// manifest and the app's icon as resources, so Explorer shows them for
 	// the files themselves.
-	unRes, err := exeResources(goos, goarch, app, generated[manifest.WindowsIcon], "uninstaller", filepath.Base(a.Uninstaller))
+	unRes, err := exeResources(goos, goarch, app, generated[manifest.WindowsIcon], "uninstaller", filepath.Base(a.Uninstaller), a.GUI)
 	if err != nil {
 		return err
 	}
-	inRes, err := exeResources(goos, goarch, app, generated[manifest.WindowsIcon], "installer", filepath.Base(a.Installer))
+	inRes, err := exeResources(goos, goarch, app, generated[manifest.WindowsIcon], "installer", filepath.Base(a.Installer), a.GUI)
 	if err != nil {
 		return err
 	}
@@ -297,12 +306,26 @@ func goBuild(ctx context.Context, o Options, dir, goos, goarch string, gui bool,
 			return err
 		}
 	}
-	ldflags := fmt.Sprintf("-s -w -buildid= -X %s/internal/version.Version=%s", RuntimeModule, o.RuntimeVersion)
 	args := []string{"build", "-trimpath", "-buildvcs=false"}
 	if !gui {
 		args = append(args, "-tags", "nogui")
 	}
-	return goCmd(ctx, o, dir, goos, goarch, gui, append(args, "-ldflags", ldflags, "-o", abs, ".")...)
+	return goCmd(ctx, o, dir, goos, goarch, gui, append(args, "-ldflags", linkFlags(o, goos, gui), "-o", abs, ".")...)
+}
+
+/*
+linkFlags are the linker's flags for a generated program. With Windowed,
+the variant with the wizard is a program with a window on Windows (spec
+006): Windows makes a console for a console program started from the
+desktop, and it shows for a moment before the wizard. The command-line
+variant is always a console program, which a terminal waits for.
+*/
+func linkFlags(o Options, goos string, gui bool) string {
+	flags := fmt.Sprintf("-s -w -buildid= -X %s/internal/version.Version=%s", RuntimeModule, o.RuntimeVersion)
+	if gui && o.Windowed && goos == "windows" {
+		flags += " -H=windowsgui"
+	}
+	return flags
 }
 
 func goCmd(ctx context.Context, o Options, dir, goos, goarch string, gui bool, args ...string) error {
