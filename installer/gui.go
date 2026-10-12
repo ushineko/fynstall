@@ -622,7 +622,11 @@ func (g *installWizard) after(r wizard.Result) int {
 	case wizard.Cancelled:
 		return exitFail
 	}
-	if g.existing != nil {
+	// Only the pages that could not replace the install offer its
+	// uninstaller. A repair or an upgrade has an existing install too, and
+	// ends on the same finish page as a first install: a desk check found
+	// its "Launch now" doing nothing.
+	if g.uninst != nil {
 		if r.Checks[RunUninstaller] {
 			start(g.existing.Uninstaller, true, "--gui")
 		}
@@ -638,7 +642,9 @@ func (g *installWizard) after(r wizard.Result) int {
 // the program goes on. ours is true for a program of fynstall's, which
 // shows a window and needs no console; the app's own program gets what
 // Windows gives it.
-func start(path string, ours bool, args ...string) {
+//
+// A variable, so a test sees what would be started.
+var start = func(path string, ours bool, args ...string) {
 	cmd := exec.CommandContext(context.Background(), path, args...) // #nosec G204 G702 -- a path this install wrote, or its index recorded
 	if ours {
 		platform.Background(cmd)

@@ -133,6 +133,10 @@ MIT. See [LICENSE](LICENSE).
   uninstaller removes it
   ([#35](https://github.com/ushineko/fynstall/issues/35)).
 
+- "Launch now" after a repair, an upgrade or a downgrade starts the program.
+  The wizard took any existing install for one it could not replace, and
+  ended without launching.
+
 ### 0.1.1 (2026-10-11)
 
 - A builder from `go install` knows its release: with no version stamped

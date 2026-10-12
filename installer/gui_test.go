@@ -423,3 +423,29 @@ func TestTheWizardSaysWhatItDoesToAnInstalledVersion(t *testing.T) {
 		})
 	}
 }
+
+// The finish page's "Launch now" starts the program after a repair or an
+// upgrade as it does after a first install, and the pages that could only
+// offer the old uninstaller start that and nothing else. A desk check found
+// a repair's launch doing nothing: any existing install was taken for the
+// second case.
+func TestTheFinishPageLaunchesAfterAReplacement(t *testing.T) {
+	var started []string
+	old := start
+	start = func(path string, _ bool, _ ...string) { started = append(started, path) }
+	t.Cleanup(func() { start = old })
+
+	m := &manifest.Manifest{Launch: "bin/hello"}
+	root := filepath.Join("x", "hello")
+	ix := &engine.Index{Uninstaller: filepath.Join(root, "uninstall")}
+	done := wizard.Result{Outcome: wizard.Finished, Checks: map[string]bool{LaunchNow: true, RunUninstaller: true}}
+
+	replaced := &installWizard{m: m, existing: ix, plan: &engine.Plan{Root: root}, launch: widget.NewCheck(LaunchNow, nil)}
+	require.Equal(t, exitOK, replaced.after(done))
+	require.Equal(t, []string{filepath.Join(root, "bin", "hello")}, started, "a replacement launches the program")
+
+	started = nil
+	stuck := &installWizard{m: m, existing: ix, uninst: widget.NewCheck(RunUninstaller, nil)}
+	require.Equal(t, exitOK, stuck.after(done))
+	require.Equal(t, []string{ix.Uninstaller}, started, "the pages that replace nothing start the old uninstaller")
+}
