@@ -23,6 +23,10 @@ func ownConsole() bool { return false }
 // releaseConsole does nothing here.
 func releaseConsole() {}
 
+// borrowConsole does nothing here: a program always has the terminal it
+// was started in (see the Windows file).
+func borrowConsole() {}
+
 // uninstallWindowAsAdmin is false: nothing here starts an uninstaller as
 // root with a window to show, and a window as root often cannot open at all
 // (see the Windows file).

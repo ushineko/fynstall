@@ -142,10 +142,12 @@ The installer is a console program, so that its command line prints and
 asks in `cmd` and PowerShell like any other. It chooses its front end by who
 started it:
 
-- **From Explorer, the Start Menu or Settings**, Windows makes a console for
-  the program alone. The installer sees that it is alone on its console,
-  closes the console and opens the wizard. The console window shows for a
-  moment first.
+- **From Explorer, the Start Menu or Settings**, the installer opens the
+  wizard. On Windows 11 24H2 and later it has no console there: its
+  manifest asks for none (`consoleAllocationPolicy`). An older Windows
+  makes a console for the program alone; the installer sees that it is
+  alone on it, closes it and opens the wizard, and the console window shows
+  for a moment first. `--windowed`, below, is for those.
 - **From a console**, the shell shares its console with the installer, and
   the installer runs on the command line. `--gui` opens the wizard from
   there.
@@ -162,6 +164,23 @@ its own UAC prompt, and the uninstaller's window opens all the same: it is
 the one window of fynstall that runs with an administrator's rights. It
 then removes the install itself, with no helper and no second prompt. From
 an administrator's console the uninstaller still runs on the command line.
+
+`fynstall build --windowed` makes the installer with the wizard, and its
+uninstaller, programs with a window. They have no console on any Windows,
+and they give up the command line's questions:
+
+- Started from anywhere without a flag that asks for the command line, the
+  installer opens the wizard.
+- Typed into a console with `--dry-run`, `--help`, `--version` or `--yes`,
+  it prints there, but the shell does not wait for it: the prompt comes
+  back first. A script waits with `start /wait` or `Start-Process -Wait`,
+  which also gives it the exit code. Output sent to a file or a pipe goes
+  there.
+- It asks nothing on a terminal. Build `--with-cli-only` beside it: the
+  command-line-only installer is a console program, and is the one for a
+  terminal, for SSH and for a script that reads what is printed.
+
+This is how an installer made with NSIS behaves.
 
 A program with a window must be built as one, or Windows opens a console
 beside its window however it is started: from the finish page, from its
