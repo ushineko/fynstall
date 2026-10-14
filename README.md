@@ -125,6 +125,14 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
+### Unreleased
+
+- **Fix**: the wizard opens for a config with `ui.launch_default: true`
+  ([#51](https://github.com/ushineko/fynstall/issues/51)). An installer
+  built by 0.2.3 from such a config stopped with a nil pointer before its
+  window: ticking the "Launch now" check drew it, and the wizard is made
+  before the app is. The command line was not affected.
+
 ### 0.2.3 (2026-10-13)
 
 - The command line starts the program (spec 008,
