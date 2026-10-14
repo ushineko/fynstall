@@ -34,8 +34,9 @@ fynstall build --windowed        # on Windows, the wizard's installer never has 
 terminal, a display), it opens the wizard. Started from a terminal, it runs
 on the command line: it asks where to install, asks for its parameters, and
 asks for confirmation. `--gui` and `--cli` override the choice. `--yes`
-accepts the defaults, `--dry-run` lists every change and makes none, and
-`--dir` chooses the directory.
+accepts the defaults, `--dry-run` lists every change and makes none,
+`--dir` chooses the directory, and `--launch` starts the program when the
+install is done.
 
 **Two variants.** The full installer has the wizard, so it needs cgo to
 build — for this machine with its own C compiler, and for another with a
@@ -123,6 +124,23 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 MIT. See [LICENSE](LICENSE).
 
 ## Changelog
+
+### Unreleased
+
+- The command line starts the program (spec 008,
+  [#48](https://github.com/ushineko/fynstall/issues/48)). `ui.launch` was
+  offered only by the wizard's "Launch now" check, so an install with
+  `--yes` could not start the program it installed. `--launch` starts it
+  now, `--launch=false` does not, and an install that asks questions asks
+  this one last. `--dry-run` says when the program would be started.
+- `ui.launch_default: true` makes starting the program the default: the
+  wizard's check starts ticked, the command line's question is `[Y/n]`, and
+  `--yes` starts it. For a program that is there whenever the desktop is,
+  which an upgrade had to stop. A launch that is only the default is passed
+  over in a session with no desktop, and said.
+- A program started by the installer on Linux gets a session of its own, so
+  it goes on when the terminal the installer was typed into closes.
+- `launch` joins the names a parameter cannot have, since it is now a flag.
 
 ### 0.2.2 (2026-10-12)
 

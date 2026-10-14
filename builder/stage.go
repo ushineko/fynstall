@@ -121,6 +121,7 @@ func stage(c *config.Config, runtimeVersion, target string) (*manifest.Manifest,
 			return nil, nil, nil, fmt.Errorf("ui.launch: %s is not a payload file for %s", launch, target)
 		}
 		m.Launch = path.Clean(launch)
+		m.LaunchDefault = c.UI.LaunchDefault
 	}
 	for _, a := range c.Actions {
 		if err := stageAction(a, m, seen, expand); err != nil {

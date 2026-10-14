@@ -26,7 +26,8 @@ payload:
     dst: share/doc/README.md
 
 ui:
-  launch: bin/hello{exe}      # the finish page offers to start it
+  launch: bin/hello{exe}      # offered at the end: "Launch now", or --launch
+  # launch_default: true      # start it unless a person says no
 
 integration:
   path_links: ["bin/hello{exe}"]

@@ -151,6 +151,19 @@ func (a *asker) yes(prompt string) (bool, error) {
 	return s == "y" || s == "yes", nil
 }
 
+// yesOr asks a yes-or-no question whose default is def.
+func (a *asker) yesOr(prompt string, def bool) (bool, error) {
+	if !def {
+		return a.yes(prompt)
+	}
+	s, err := a.line(prompt + " [Y/n] ")
+	if err != nil {
+		return false, err
+	}
+	s = strings.ToLower(s)
+	return s != "n" && s != "no", nil
+}
+
 // progressEvery is how often the CLI's progress line is redrawn.
 const progressEvery = 100 * time.Millisecond
 

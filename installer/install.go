@@ -21,6 +21,7 @@ type installFlags struct {
 	cli, gui, yes, dryRun, uninstall, forceReceipt, verbose, version, downgrade bool
 	dir, scope                                                                  string
 	params                                                                      map[string]string
+	launch                                                                      launchFlag
 }
 
 // Install runs the installer and returns its exit code.
@@ -45,6 +46,9 @@ func Install(args []string, p Payload, e Env) int {
 	fl.StringVar(&f.scope, "scope", "", "install scope: user, or system for everyone on this computer")
 	applyPlanFile := fl.String("apply-plan", "", "used by the installer itself: apply the plan in this file as root")
 	checkExt := fl.Bool("check-extension", false, "used by fynstall build: check the program's own installer code and exit")
+	if m.Launch != "" {
+		fl.Var(&f.launch, "launch", "start "+m.App.Name+" when the install is done (--launch=false: do not)")
+	}
 	paramValues := paramFlags(fl, m)
 	if m.Compat == CompatNSIS {
 		if args, err = nsisArgs(args, m); err != nil {
@@ -225,7 +229,11 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 		_, _ = fmt.Fprintf(e.Out, "%s: the uninstaller that came with %s removes it first, then this version installs.\n",
 			replacementText(m, old.receipt.App.Version), old.receipt.App.Version)
 	}
-	printPlan(e, plan, f.dryRun, installHookLines(ext, m.App.Name)...)
+	lines := installHookLines(ext, m.App.Name)
+	if f.launch.planned(m) && (f.launch.set || pageAsk == nil) && launchRefusal(e, f.launch.set) == "" {
+		lines = append(lines, fmt.Sprintf("after the install, starts %s", filepath.Join(plan.Root, filepath.FromSlash(m.Launch))))
+	}
+	printPlan(e, plan, f.dryRun, lines...)
 	if f.dryRun {
 		return exitOK
 	}
@@ -294,6 +302,7 @@ func install(m *manifest.Manifest, p Payload, f installFlags, e Env, old *instal
 		_, _ = fmt.Fprintf(e.Err, "%v\n", hookErr)
 		return exitFail
 	}
+	launchCLI(m, f, e, plan.Root, pageAsk)
 	return exitOK
 }
 

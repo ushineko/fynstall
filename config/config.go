@@ -194,6 +194,9 @@ type UI struct {
 	// Launch is a payload destination, which may use build placeholders.
 	// The finish page offers to start it.
 	Launch string `yaml:"launch"`
+	// LaunchDefault makes starting it the default: the finish page's check
+	// starts ticked, and an install with --yes starts it.
+	LaunchDefault bool `yaml:"launch_default"`
 }
 
 // Install says where the program goes.

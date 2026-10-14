@@ -216,6 +216,9 @@ func TestParametersAndConfigFilesAreChecked(t *testing.T) {
 	}{
 		{"a valid pair", "parameters:\n  - name: server\n    default: x\nactions:\n  - config_file:\n      path: \"{config}/hello/config.yml\"\n      values: {server: \"{param:server}\"}\n", "", "", 0},
 		{"a reserved name", "parameters:\n  - name: dir\n", "parameters[0].name", "installer's own flags", 9},
+		{"a reserved name that is a switch", "parameters:\n  - name: launch\n", "parameters[0].name", "installer's own flags", 9},
+		{"a launch by default", "ui:\n  launch: bin/hello\n  launch_default: true\n", "", "", 0},
+		{"a default with nothing to launch", "ui:\n  launch_default: true\n", "ui.launch_default", "no ui.launch", 9},
 		{"a bad name", "parameters:\n  - name: Server\n", "parameters[0].name", "not a parameter name", 9},
 		{"a secret with a default", "parameters:\n  - name: token\n    secret: true\n    default: abc\n", "parameters[0].default", "a secret has no default", 11},
 		{"a path inside nothing", "actions:\n  - config_file:\n      path: /etc/hello.yml\n      values: {a: b}\n", "actions[0].config_file.path", "must start with {config}/", 10},

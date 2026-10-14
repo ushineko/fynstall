@@ -2,7 +2,11 @@
 
 package installer
 
-import "os"
+import (
+	"os"
+	"os/exec"
+	"syscall"
+)
 
 // Messages of chooseMode that name what this OS calls things.
 const (
@@ -35,6 +39,10 @@ const windowAsAdmin = false
 // desktopCommand is the command that starts the program at path: the path.
 // No window runs as root here, so there is nobody else to start it as.
 func desktopCommand(path string, _ func(string) string) (string, []string) { return path, nil }
+
+// detach puts cmd in a session of its own, so it outlives the terminal the
+// installer was typed into: closing that terminal hangs up its session.
+func detach(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
 
 // otherAccount is "": see the Windows file.
 func otherAccount() string { return "" }

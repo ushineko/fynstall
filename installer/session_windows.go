@@ -2,6 +2,7 @@ package installer
 
 import (
 	"os"
+	"os/exec"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -120,6 +121,10 @@ func viaExplorer(path, systemRoot string) (string, []string) {
 	}
 	return systemRoot + `\explorer.exe`, []string{path}
 }
+
+// detach does nothing here: a program Windows starts does not end with the
+// console of the program that started it (see the other file).
+func detach(*exec.Cmd) {}
 
 /*
 otherAccount names the account this program runs as, when that is not the
