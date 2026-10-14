@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"fyne.io/fyne/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -64,5 +65,30 @@ func TestTheLaunchCheckStartsAsTheConfigSays(t *testing.T) {
 	m.LaunchDefault = true
 	g, err = newInstallWizard(m, p, installFlags{scope: "user"}, e)
 	require.NoError(t, err)
+	require.True(t, g.launch.Checked)
+}
+
+/*
+The wizard is made before the app is: wizard.Run starts one. An installer
+whose config starts the program by default stopped here with a nil pointer,
+before any window, because ticking the check drew it. Every other test of the
+wizard has the test app behind it, which is why none of them said so.
+*/
+func TestTheWizardIsMadeBeforeThereIsAnApp(t *testing.T) {
+	m, p, e, _ := guiFixture(t)
+	m.LaunchDefault = true
+	// Without the settings page, which is not made before the app either
+	// and has an issue of its own (#52).
+	m.Parameters = nil
+	was := fyne.CurrentApp()
+	fyne.SetCurrentApp(nil)
+	t.Cleanup(func() { fyne.SetCurrentApp(was) })
+
+	var g *installWizard
+	require.NotPanics(t, func() {
+		var err error
+		g, err = newInstallWizard(m, p, installFlags{scope: "user"}, e)
+		require.NoError(t, err)
+	})
 	require.True(t, g.launch.Checked)
 }

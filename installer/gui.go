@@ -191,8 +191,10 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 	if m.Launch != "" {
 		g.launch = widget.NewCheck(LaunchNow, nil)
 		// Ticked where the config says the program is started by default
-		// (spec 008); a person clears it to say no.
-		g.launch.SetChecked(m.LaunchDefault)
+		// (spec 008); a person clears it to say no. The field, not
+		// SetChecked: that draws the check again, and the wizard is made
+		// before there is an app to draw it with.
+		g.launch.Checked = m.LaunchDefault
 		checks = append(checks, g.launch)
 	}
 	add(extension.PageFinish, wizard.Finish("Done", g.finishText(), checks...))
