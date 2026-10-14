@@ -407,7 +407,31 @@ What the wizard shows.
 | Key | Meaning |
 |---|---|
 | `welcome` | A Markdown file for the first page. Without it, the page says what is installed, by whom, and that it needs no administrator rights. |
-| `launch` | A payload destination that the finish page offers to start. It can use `{os}`, `{arch}` and `{exe}`. |
+| `launch` | A payload destination that the installer offers to start when it is done. It can use `{os}`, `{arch}` and `{exe}`. |
+| `launch_default` | `true` makes starting it the default. Without it the default is not to. It needs `launch`. |
+
+**Starting the program.** The wizard's last page has a "Launch now" check.
+On the command line the flag is `--launch`, and an install that asks
+questions asks "Start Hello now?" as its last one. `--launch=false` says no.
+
+| | Without `launch_default` | With `launch_default: true` |
+|---|---|---|
+| The wizard's check | starts clear | starts ticked |
+| The command line's question | `[y/N]` | `[Y/n]` |
+| `--yes`, which asks nothing | does not start it | starts it |
+
+Use `launch_default` for a program that is there whenever the desktop is,
+such as a panel: after an upgrade, which had to stop it, it comes back.
+
+Two cases start nothing. A session with no desktop (ssh, a service) passes
+over a launch that is only the default, and says so; `--launch` is still
+tried there. An installer that runs as root on Linux never starts the
+program, since it would start it as root. On Windows an installer that runs
+as an administrator asks Explorer to start the program, which starts it as
+the person at the desktop.
+
+`--dry-run` says "after the install, starts" and the program's path when
+the install would start it. `launch` cannot be the name of a parameter.
 
 ## cli
 

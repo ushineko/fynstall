@@ -61,6 +61,9 @@ type Manifest struct {
 	Welcome string `json:"welcome,omitempty"`
 	// Launch is the payload file the finish page offers to start.
 	Launch string `json:"launch,omitempty"`
+	// LaunchDefault is true when starting it is the default: the page's
+	// check starts ticked, and --yes starts it (spec 008).
+	LaunchDefault bool `json:"launch_default,omitempty"`
 	// Compat is "nsis" when the installer also takes the switches of an NSIS
 	// installer (spec 002 L1), and "" otherwise.
 	Compat string `json:"compat,omitempty"`

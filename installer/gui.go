@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -191,6 +190,9 @@ func newInstallWizard(m *manifest.Manifest, p Payload, f installFlags, e Env) (*
 	var checks []*widget.Check
 	if m.Launch != "" {
 		g.launch = widget.NewCheck(LaunchNow, nil)
+		// Ticked where the config says the program is started by default
+		// (spec 008); a person clears it to say no.
+		g.launch.SetChecked(m.LaunchDefault)
 		checks = append(checks, g.launch)
 	}
 	add(extension.PageFinish, wizard.Finish("Done", g.finishText(), checks...))
@@ -641,28 +643,9 @@ func (g *installWizard) after(r wizard.Result) int {
 		return exitOK
 	}
 	if g.launch != nil && r.Checks[LaunchNow] {
-		// As the person at the desktop, also when the installer runs as an
-		// administrator (spec 007).
-		name, args := desktopCommand(filepath.Join(g.plan.Root, filepath.FromSlash(g.m.Launch)), g.e.Getenv)
-		start(name, false, args...)
+		launch(g.m, g.plan.Root, g.e.Getenv)
 	}
 	return exitOK
-}
-
-// start runs a program and does not wait for it: the installer exits and
-// the program goes on. ours is true for a program of fynstall's, which
-// shows a window and needs no console; the app's own program gets what
-// Windows gives it.
-//
-// A variable, so a test sees what would be started.
-var start = func(path string, ours bool, args ...string) {
-	cmd := exec.CommandContext(context.Background(), path, args...) // #nosec G204 G702 -- a path this install wrote, or its index recorded
-	if ours {
-		platform.Background(cmd)
-	}
-	if err := cmd.Start(); err == nil {
-		_ = cmd.Process.Release()
-	}
 }
 
 // icon is the largest app icon in the payload, for the window. A Windows

@@ -144,6 +144,9 @@ func validate(c *Config, root *yaml.Node) Errors {
 			k.fail(k.line("ui", "launch"), "ui.launch", "%s", msg)
 		}
 	}
+	if c.UI.LaunchDefault && c.UI.Launch == "" {
+		k.fail(k.line("ui", "launch_default"), "ui.launch_default", "there is no ui.launch for it to start")
+	}
 	for i, p := range c.Integration.KeepOnUninstall {
 		k.template(p, "integration.keep_on_uninstall", "integration", "keep_on_uninstall", i)
 	}
@@ -391,7 +394,7 @@ var paramRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // ReservedParameters are the installer's own flags, which a parameter
 // cannot be named, since each parameter is also a flag --<name>.
-var ReservedParameters = []string{"cli", "gui", "yes", "dry-run", "uninstall", "force-receipt-uninstall",
+var ReservedParameters = []string{"cli", "gui", "yes", "dry-run", "uninstall", "force-receipt-uninstall", "launch",
 	"verbose", "version", "dir", "scope", "help", "h"}
 
 func (k *checker) parameters(c *Config) {
