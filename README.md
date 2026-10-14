@@ -1,6 +1,6 @@
 # fynstall
 
-**Version**: 0.2.3
+**Version**: 0.2.4
 
 An installer framework for Go and [Fyne](https://fyne.io) programs. You
 describe a program in `fynstall.yaml`, and `fynstall build` produces one
@@ -125,7 +125,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
-### Unreleased
+### 0.2.4 (2026-10-13)
 
 - **Fix**: the wizard opens for a config with `ui.launch_default: true`
   ([#51](https://github.com/ushineko/fynstall/issues/51)). An installer
