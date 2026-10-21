@@ -114,6 +114,8 @@ type Plan struct {
 	Replaces string
 	// gone are the paths the replaced install's uninstaller removes.
 	gone map[string]bool
+	// restored are the paths it puts back what it replaced at.
+	restored map[string]bool
 }
 
 // Options are the choices a front end passes to NewPlan.
@@ -158,7 +160,7 @@ func NewPlan(m *manifest.Manifest, o Options) (*Plan, error) {
 	p := &Plan{Manifest: m, Scope: o.Scope, Replaces: o.Replaces}
 	if o.Replacing != nil {
 		p.Replaces = o.Replacing.App.Version
-		p.gone = gone(o.Replacing)
+		p.gone, p.restored = gone(o.Replacing), restored(o.Replacing)
 	}
 
 	root := o.Root
@@ -378,6 +380,13 @@ func (p *Plan) check(dst, base string) (bool, error) {
 		// goes in must stay inside base.
 		return false, Contained(base, filepath.Dir(dst))
 	}
+	if p.restored[dst] {
+		// What is there is the replaced install's own, a link into its
+		// directory among them. Its uninstaller puts back what it replaced,
+		// and this install replaces that in turn, so only the directory must
+		// stay inside base, as for a path that is gone.
+		return true, Contained(base, filepath.Dir(dst))
+	}
 	if err := Contained(base, dst); err != nil {
 		return false, err
 	}
@@ -443,6 +452,17 @@ func gone(r *Receipt) map[string]bool {
 		}
 		switch {
 		case e.Op == OpCreate, e.Op == OpMkdir, e.Op == OpService && e.Backup == "" && e.OldLink == "":
+			out[e.Path] = true
+		}
+	}
+	return out
+}
+
+// restored is where r's uninstaller puts back what its install replaced.
+func restored(r *Receipt) map[string]bool {
+	out := map[string]bool{}
+	for _, e := range r.Journal {
+		if e.Op == OpReplace && !kept(e.Path, r.Keep) {
 			out[e.Path] = true
 		}
 	}
