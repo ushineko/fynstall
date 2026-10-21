@@ -631,3 +631,64 @@ func TestAnUninstallThatFailsLeavesItsRecordItsIndexEntryAndItsUninstaller(t *te
 	f.uninstall(t)
 	require.Equal(t, before, f.snap(t))
 }
+
+// installAgain plans the same installer over r and carries it out the way the
+// installer does: the old version's uninstaller first, then the new install.
+func (f *fixture) installAgain(t *testing.T, r *Receipt) *Receipt {
+	t.Helper()
+	p, err := NewPlan(f.m, Options{Env: f.env, Uninstaller: []byte("uninstaller"), Replacing: r})
+	require.NoError(t, err, "planning over the install it replaces")
+	_, err = Uninstall(r, ReasonUpgrade, nil)
+	require.NoError(t, err)
+	next, err := Apply(context.Background(), p, f.payload, []byte("uninstaller"), nil)
+	require.NoError(t, err)
+	return next
+}
+
+// A repair or an upgrade plans over the links the install it replaces made in
+// {bin}. Each points into the install directory by design, and the old
+// uninstaller removes it before the new install writes (#56).
+func TestInstallingAgainReplacesTheLinksTheInstallMade(t *testing.T) {
+	needsIntegration(t)
+	needsLinks(t)
+	f := newFixture(t)
+	f.withIntegration()
+	before := f.snap(t)
+
+	r, err := f.install(t)
+	require.NoError(t, err)
+	r = f.installAgain(t, r)
+
+	got, err := os.Readlink(f.bin())
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(f.root(), "bin", "hello"), got)
+	_, err = Uninstall(r, ReasonUninstall, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, f.snap(t))
+}
+
+// A link in {bin} that replaced something already there (a copy an install
+// script left) is put back by the old uninstaller, not removed. The new
+// install replaces what comes back and keeps it to put back in turn, so the
+// copy survives any number of upgrades (#56, found upgrading hayami).
+func TestInstallingAgainOverALinkThatReplacedAFileKeepsTheFile(t *testing.T) {
+	needsIntegration(t)
+	needsLinks(t)
+	f := newFixture(t)
+	f.withIntegration()
+	write(t, f.bin(), "an earlier copy\n")
+	before := f.snap(t)
+
+	r, err := f.install(t)
+	require.NoError(t, err)
+	for range 2 {
+		r = f.installAgain(t, r)
+		got, err := os.Readlink(f.bin())
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(f.root(), "bin", "hello"), got)
+	}
+
+	_, err = Uninstall(r, ReasonUninstall, nil)
+	require.NoError(t, err)
+	require.Equal(t, before, f.snap(t), "the earlier copy is put back")
+}

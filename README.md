@@ -125,6 +125,22 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
+### Unreleased
+
+- **Fix**: installing again over an install whose links replaced an earlier
+  file no longer stops at the plan
+  ([#56](https://github.com/ushineko/fynstall/issues/56)). When the first
+  install found a copy in `~/.local/bin` (one an `install.sh` left, say), it
+  recorded its link there as replaced, which its uninstaller puts back
+  rather than removes. The next install, an upgrade or a repair, checked the
+  link as if it were someone else's, found it pointing into the install
+  directory and refused it: "resolves to ..., outside the directory it
+  belongs in". It now treats that path as the old install's own, replaces
+  what the old uninstaller puts back, and keeps that to put back in turn, so
+  the earlier copy survives any number of upgrades. An install built by
+  0.2.4 or earlier still fails to upgrade itself this way; running its
+  uninstaller first, then the new installer, gets past it.
+
 ### 0.2.4 (2026-10-13)
 
 - **Fix**: the wizard opens for a config with `ui.launch_default: true`
