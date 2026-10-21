@@ -1,6 +1,6 @@
 # fynstall
 
-**Version**: 0.2.4
+**Version**: 0.2.5
 
 An installer framework for Go and [Fyne](https://fyne.io) programs. You
 describe a program in `fynstall.yaml`, and `fynstall build` produces one
@@ -125,7 +125,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
-### Unreleased
+### 0.2.5 (2026-10-21)
 
 - **Fix**: installing again over an install whose links replaced an earlier
   file no longer stops at the plan
