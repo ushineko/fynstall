@@ -31,6 +31,12 @@ parameters:
   - name: token
     label: Access token
     secret: true
+  # An action for this install, not a setting: an upgrade starts it from its
+  # default rather than from what the installed version was given (spec 009).
+  - name: wave
+    label: Wave once installed
+    default: "no"
+    once: true
 
 actions:
   - config_file:

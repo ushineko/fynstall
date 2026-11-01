@@ -81,6 +81,9 @@ type Parameter struct {
 	Default     string `json:"default,omitempty"`
 	Secret      bool   `json:"secret,omitempty"`
 	Required    bool   `json:"required,omitempty"`
+	// Once: an upgrade does not carry the installed version's value
+	// (spec 009).
+	Once bool `json:"once,omitempty"`
 }
 
 // ConfigFile is a config_file action: Path is a template that starts with

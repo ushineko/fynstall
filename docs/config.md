@@ -221,15 +221,18 @@ access token. Actions use them as `{param:<name>}`.
 | `default` | The value when nothing else gives one. |
 | `secret` | The value is never printed, logged or recorded. A secret has no default, because the default would be published with the config. |
 | `required` | The install stops, and names the flag, when no source gives a value. A required parameter has no default. |
+| `once` | The parameter asks for an action this install takes, not a setting: an upgrade does not carry the value the installed version was given, and starts it from its default. For a choice such as "install this service now", which carried into every later upgrade would be made again, unasked. |
 
 **Where a value comes from**, first match wins:
 
 1. a flag: `--token=…`;
 2. `fynstall-params.yml` in the installer's directory, a flat map of names
    to values; a name that is not a parameter is an error;
-3. a person, when the installer runs in a terminal without `--yes`; a
+3. on an upgrade, the value the installed version was given, unless the
+   parameter is `once`;
+4. a person, when the installer runs in a terminal without `--yes`; a
    secret is read without echo;
-4. the default.
+5. the default.
 
 The install record keeps the values of non-secret parameters, for a later
 upgrade, and only the names of secret ones.

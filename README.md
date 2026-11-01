@@ -1,6 +1,6 @@
 # fynstall
 
-**Version**: 0.2.5
+**Version**: 0.2.6
 
 An installer framework for Go and [Fyne](https://fyne.io) programs. You
 describe a program in `fynstall.yaml`, and `fynstall build` produces one
@@ -124,6 +124,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 MIT. See [LICENSE](LICENSE).
 
 ## Changelog
+
+### 0.2.6 (2026-11-01)
+
+- **Added**: a parameter can be marked `once`
+  ([#61](https://github.com/ushineko/fynstall/issues/61), spec 009). It asks
+  for an action this install takes, not a setting, so an upgrade starts it
+  from its default rather than carrying the value the installed version was
+  given. Without it, a choice such as "install this service now" was made
+  again at every upgrade, unasked.
 
 ### 0.2.5 (2026-10-21)
 

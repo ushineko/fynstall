@@ -63,6 +63,10 @@ type Parameter struct {
 	// Secret values are never logged, printed or recorded.
 	Secret   bool `yaml:"secret"`
 	Required bool `yaml:"required"`
+	// Once marks a parameter that asks for an action this install takes,
+	// not a setting: an upgrade starts it from its default, not from the
+	// value the installed version was given (spec 009).
+	Once bool `yaml:"once"`
 }
 
 // Action is one install-time action (spec 002 D2a). Exactly one field is
