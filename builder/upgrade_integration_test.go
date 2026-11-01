@@ -3,6 +3,7 @@
 package builder_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,36 @@ func TestASecretSurvivesAnUpgradeWithoutBeingAskedFor(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(b), `"token": "`+fakeToken+`"`)
 	require.Contains(t, string(b), `"name": "sam"`)
+}
+
+/*
+Spec 009, #61. A parameter marked once is an action for one install, not a
+setting: an upgrade starts it from its default and does not carry the value
+the installed version was given, while an ordinary parameter is carried as
+before. Read from the receipt each install leaves.
+*/
+func TestAnUpgradeDoesNotCarryAParameterMarkedOnce(t *testing.T) {
+	h := greetHome(t)
+	code, out := h.run(t, greetAMD64.Installer, "--yes", "--token=example-not-a-credential", "--name=sam", "--wave=yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, "yes", receiptParam(t, h, "wave"), "the first install took the flag")
+
+	code, out = h.run(t, greetAMD64.Installer, "--yes")
+	require.Equal(t, 0, code, out)
+	require.Equal(t, "no", receiptParam(t, h, "wave"), "the upgrade carried an action")
+	require.Equal(t, "sam", receiptParam(t, h, "name"), "an ordinary parameter is carried as before")
+}
+
+// receiptParam is one parameter's value in the install's receipt.
+func receiptParam(t *testing.T, h home, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(h.root, ".fynstall", "receipt.json"))
+	require.NoError(t, err)
+	var r struct {
+		Parameters map[string]string `json:"parameters"`
+	}
+	require.NoError(t, json.Unmarshal(b, &r))
+	return r.Parameters[name]
 }
 
 // An uninstaller from before --upgrade existed is run with --quiet, and the

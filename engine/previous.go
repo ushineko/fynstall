@@ -21,7 +21,10 @@ func Previous(m *manifest.Manifest, r *Receipt, env func(string) string) (values
 	values = map[string]string{}
 	declared := map[string]bool{}
 	for _, p := range m.Parameters {
-		declared[p.Name] = true
+		// A parameter that asks for an action is decided afresh by each
+		// install: carried, a choice made once would be made again at every
+		// upgrade, unasked (spec 009).
+		declared[p.Name] = !p.Once
 	}
 	for k, v := range r.Parameters {
 		if declared[k] {
