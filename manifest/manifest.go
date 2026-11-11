@@ -111,6 +111,9 @@ type Service struct {
 	Start       bool     `json:"start,omitempty"`
 	// Restart is no, on-failure or always.
 	Restart string `json:"restart"`
+	// Own is true when the service runs as an account of its own (spec
+	// 010). Added after receipts existed; an older one reads false.
+	Own bool `json:"own,omitempty"`
 }
 
 // Run runs the payload file Exec. Args and Undo may use {param:<name>}

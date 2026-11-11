@@ -92,7 +92,13 @@ type ServiceAction struct {
 	Start *bool `yaml:"start"`
 	// Restart is no, on-failure (the default) or always.
 	Restart string `yaml:"restart"`
+	// Account is empty, for the service manager's own account, or own,
+	// for an identity of the service's own with a user's rights (spec 010).
+	Account string `yaml:"account"`
 }
+
+// AccountOwn is the one value of ServiceAction.Account.
+const AccountOwn = "own"
 
 // Starts reports whether the service is started after the install.
 func (s *ServiceAction) Starts() bool { return s.Start == nil || *s.Start }

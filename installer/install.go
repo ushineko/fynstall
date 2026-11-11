@@ -423,6 +423,14 @@ func actionLines(p *engine.Plan) []string {
 			if s.Key != "" {
 				line = fmt.Sprintf("service  %s (a Windows service that runs %s)", s.Name, commandLine(s.Def.Exec, s.Def.Args))
 			}
+			switch {
+			case s.Def.Account != "":
+				line += ", as " + s.Def.Account
+			case s.Own && s.System:
+				line += ", as a user of its own"
+			case s.Own:
+				line += "; a user service runs as its user already"
+			}
 			if s.Start {
 				line += ", started"
 			}

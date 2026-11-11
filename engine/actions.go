@@ -34,6 +34,9 @@ type PlannedService struct {
 	Start   bool
 	// System is true for a system service.
 	System bool
+	// Own is true when the config asked for an account of the service's
+	// own (spec 010).
+	Own bool
 	// Exists is true when a unit file is already at Unit. Apply saves it,
 	// and the uninstaller puts it back with its enabled and running state.
 	Exists bool
@@ -163,9 +166,10 @@ func (p *Plan) addService(s *manifest.Service, vars map[string]string, expandAll
 	}
 	system := platform.System(vars)
 	ps := &PlannedService{
-		Name: s.Name, Unit: platform.UnitPath(vars, s.Name), Start: s.Start, System: system,
+		Name: s.Name, Unit: platform.UnitPath(vars, s.Name), Start: s.Start, System: system, Own: s.Own,
 		Content: platform.RenderUnit(platform.Unit{
 			AppID: p.Manifest.App.ID, Description: desc, Exec: p.inRoot(s.Exec), Args: args, Restart: s.Restart, System: system,
+			Own: s.Own, StateDir: s.Name,
 		}),
 	}
 	if ps.Exists, err = p.check(ps.Unit, vars["config"]); err != nil {
@@ -193,6 +197,9 @@ func (p *Plan) addWindowsService(s *manifest.Service, vars map[string]string, ex
 		Name: s.Name, DisplayName: s.Description, Description: s.Description,
 		Exec: p.inRoot(s.Exec), Args: args, Restart: s.Restart,
 	}
+	if s.Own {
+		def.Account = platform.VirtualAccount(s.Name)
+	}
 	if def.DisplayName == "" {
 		// Windows wants each service's display name to be its own, so the
 		// app's name, which two services of one app share, does not serve.
@@ -208,7 +215,7 @@ func (p *Plan) addWindowsService(s *manifest.Service, vars map[string]string, ex
 			return fmt.Errorf("service %s: Windows already has a service of that name, which this program's installer did not make and so does not replace; remove that service first", s.Name)
 		}
 	}
-	p.Actions = append(p.Actions, PlannedAction{Service: &PlannedService{Name: s.Name, Start: s.Start, System: true, Key: key, Def: def}})
+	p.Actions = append(p.Actions, PlannedAction{Service: &PlannedService{Name: s.Name, Start: s.Start, System: true, Own: s.Own, Key: key, Def: def}})
 	return nil
 }
 

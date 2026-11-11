@@ -497,6 +497,9 @@ func (k *checker) service(s *ServiceAction, field string, seen map[string]bool, 
 	if strings.ContainsFunc(s.Description, unicode.IsControl) {
 		k.fail(at("description"), field+".description", "must be one line of text")
 	}
+	if s.Account != "" && s.Account != AccountOwn {
+		k.fail(at("account"), field+".account", "%q is not %s: leave the key out for the service manager's own account", s.Account, AccountOwn)
+	}
 }
 
 func (k *checker) run(r *RunAction, field string, params map[string]Parameter, keys ...any) {

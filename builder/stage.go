@@ -185,6 +185,7 @@ func stageAction(a config.Action, m *manifest.Manifest, payload map[string]strin
 		}
 		m.Actions = append(m.Actions, manifest.Action{Service: &manifest.Service{
 			Name: s.Name, Description: s.Description, Exec: e, Args: s.Args, Start: s.Starts(), Restart: s.RestartPolicy(),
+			Own: s.Account == config.AccountOwn,
 		}})
 	case a.Run != nil:
 		r := a.Run
