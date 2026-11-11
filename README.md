@@ -1,6 +1,6 @@
 # fynstall
 
-**Version**: 0.2.6
+**Version**: 0.2.7
 
 An installer framework for Go and [Fyne](https://fyne.io) programs. You
 describe a program in `fynstall.yaml`, and `fynstall build` produces one
@@ -125,7 +125,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
-### Unreleased
+### 0.2.7 (2026-11-10)
 
 - **Added**: a service can run as an account of its own, `account: own`
   ([#63](https://github.com/ushineko/fynstall/issues/63), spec 010). On
