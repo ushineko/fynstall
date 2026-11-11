@@ -258,3 +258,20 @@ func TestAFailedInstallRemovesTheServiceItRegistered(t *testing.T) {
 	require.ErrorContains(t, err, "setup.exe")
 	require.Equal(t, before, f.snap(t))
 }
+
+// An account of its own is the service's virtual account (spec 010 R2).
+func TestAServiceOfItsOwnRunsAsItsVirtualAccount(t *testing.T) {
+	f := newFixture(t)
+	f.withService(t, "on-failure")
+	f.m.Actions[0].Service.Own = true
+	p, err := NewPlan(f.m, Options{Scope: "system", Env: f.env, Uninstaller: []byte("uninstaller")})
+	require.NoError(t, err)
+	require.Equal(t, `NT SERVICE\hello`, p.Actions[0].Service.Def.Account)
+	r, err := Apply(context.Background(), p, f.payload, []byte("uninstaller"), nil)
+	require.NoError(t, err)
+	got, ok := f.reg(t, servicesKey+"hello", "ObjectName")
+	require.True(t, ok)
+	require.Equal(t, `NT SERVICE\hello`, got)
+	_, err = Uninstall(r, ReasonUninstall, nil)
+	require.NoError(t, err)
+}

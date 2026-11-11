@@ -294,6 +294,7 @@ installer does not run the program to produce one.
 | `args` | Its arguments. They can use the path placeholders. |
 | `start` | Start it after the install. The default is `true`. |
 | `restart` | `no`, `on-failure` (the default) or `always`. |
+| `account` | `own` runs the service as an account of its own, with the rights any user has. Without it, the service manager's own account runs it. See below. |
 
 On Linux, a per-user install writes a systemd user unit,
 `{config}/systemd/user/<name>.service`, and enables it, so it starts at
@@ -302,6 +303,11 @@ name was there before, the install saves it, and the uninstaller puts it
 back, enabled and running again if it was. The install needs `systemctl`
 on `PATH`. A system install's service comes with system scope.
 
+`account: own` makes a system unit run as a user that systemd makes for it
+(`DynamicUser=yes`), with `/var/lib/<name>` to write in
+(`StateDirectory=<name>`). A user unit already runs as its user, so the key
+changes nothing there, and the plan says so.
+
 On Windows, the service is a service of the Windows service manager. It
 runs as LocalSystem and starts with the computer.
 
@@ -309,6 +315,11 @@ runs as LocalSystem and starts with the computer.
   for everyone (`--scope system`), and a per-user install of such a config
   stops with that message before it changes anything. A config with a
   service that does not offer system scope does not build for Windows.
+- `account: own` runs it as the virtual account `NT SERVICE\<name>`
+  instead. Windows keeps that account, with no password. Its SID can be
+  named in an access list, so the program can grant itself a directory, and
+  it has no administrator rights. It can read the install directory and
+  `%ProgramData%`, and not the files of the users of the computer.
 - The program must answer the service manager: say that it runs, and stop
   when asked. Windows stops a program that does not after 30 seconds. In
   Go, `golang.org/x/sys/windows/svc` does this; `examples/beacon` shows it.

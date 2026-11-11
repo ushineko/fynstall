@@ -259,6 +259,8 @@ func TestActionsAreChecked(t *testing.T) {
 		{"a bad service name", "actions:\n  - service:\n      name: hello.service\n      exec: bin/hello\n", "actions[0].service.name", "not a service name", 17},
 		{"an exec outside", "actions:\n  - service:\n      name: hello\n      exec: ../hello\n", "actions[0].service.exec", "leaves the install directory", 18},
 		{"a bad restart", "actions:\n  - service:\n      name: hello\n      exec: bin/hello\n      restart: sometimes\n", "actions[0].service.restart", "not one of", 19},
+		{"an account of its own", "actions:\n  - service:\n      name: hello\n      exec: bin/hello\n      account: own\n", "", "", 0},
+		{"a named account", "actions:\n  - service:\n      name: hello\n      exec: bin/hello\n      account: root\n", "actions[0].service.account", "is not own", 19},
 		{"no undo", "actions:\n  - run:\n      exec: bin/hello\n", "actions[0].run.undo", "required", 16},
 		{"a bad undo", "actions:\n  - run:\n      exec: bin/hello\n      undo: never\n", "", "the word none", 0},
 		{"a secret argument", "actions:\n  - run:\n      exec: bin/hello\n      args: [\"--token={param:token}\"]\n      undo: none\n", "actions[0].run.args", "is secret", 18},

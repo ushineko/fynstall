@@ -125,6 +125,15 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
+### Unreleased
+
+- **Added**: a service can run as an account of its own, `account: own`
+  ([#63](https://github.com/ushineko/fynstall/issues/63), spec 010). On
+  Windows that is the virtual account `NT SERVICE\<name>` in place of
+  LocalSystem. On Linux a system unit gets a dynamic user and a state
+  directory. A program that needs no administrator rights no longer has
+  them.
+
 ### 0.2.6 (2026-11-01)
 
 - **Added**: a parameter can be marked `once`

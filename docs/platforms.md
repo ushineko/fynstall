@@ -55,7 +55,8 @@ which shows the desktop's password dialog) or `sudo` (on the command line).
   When the program left files, the helper waits while the window asks about
   them, so "Remove them too" needs no second password.
 - Services, `run` actions and uninstall hooks of a system install run as
-  root.
+  root. A service with `account: own` runs as a user that systemd makes for
+  it instead, with `/var/lib/<name>` to write in.
 
 ## Windows
 
@@ -232,6 +233,7 @@ the install starts, and `--dry-run` prints them.
 
 A `service` action registers a service with the Windows service manager,
 through its API and not through `sc.exe`. The service runs as LocalSystem,
+or as `NT SERVICE\<name>` with `account: own`,
 starts with the computer, and has the recovery actions that `restart` asks
 for. Only an install for everyone has one, and the helper registers it, as
 it makes every other change of a system install.
@@ -241,6 +243,12 @@ The receipt names the service by its registry key,
 service, waits for its process to end, and removes it, before it removes
 the program's files. An upgrade does the same through the old version's
 uninstaller, so no file is replaced under a running service.
+
+A service with `account: own` has a profile of its own,
+`C:\Windows\ServiceProfiles\<name>`. Windows makes it the first time the
+service starts, and keeps its registry hive loaded after the service is
+removed. The uninstaller leaves it: it is Windows' own, and cannot be removed
+before a restart.
 
 `docs/config.md` says what the program must do to run as a service, and
 what an install does when a service of the same name is there already.

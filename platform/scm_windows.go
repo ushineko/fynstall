@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"strings"
@@ -60,8 +61,10 @@ func SCMExists(key string) (bool, error) {
 	return false, fmt.Errorf("ask the service manager about %s: %w", name, err)
 }
 
-// SCMCreate registers the service d under key. It runs as LocalSystem and
-// starts with the computer. When the config asks for a restart, Windows
+// SCMCreate registers the service d under key. It runs as LocalSystem, or
+// as d.Account with no password and an unrestricted service SID, so that the
+// account can be named in an access list (spec 010). It starts with the
+// computer. When the config asks for a restart, Windows
 // starts it again after a failure: a crash, or a stop with an exit code
 // other than 0. A service that is half made is removed again, so the caller
 // records it only once it is whole.
@@ -75,10 +78,14 @@ func SCMCreate(key string, d ServiceDef) (err error) {
 		return fmt.Errorf("service %s: connect to the service manager: %w", name, err)
 	}
 	defer func() { _ = m.Disconnect() }()
-	s, err := m.CreateService(name, d.Exec, mgr.Config{
+	c := mgr.Config{
 		StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorNormal,
 		DisplayName: d.DisplayName, Description: d.Description,
-	}, d.Args...)
+	}
+	if d.Account != "" {
+		c.ServiceStartName, c.SidType = d.Account, windows.SERVICE_SID_TYPE_UNRESTRICTED
+	}
+	s, err := m.CreateService(name, d.Exec, c, d.Args...)
 	if errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
 		return fmt.Errorf("service %s: Windows is still removing a service of that name; close the Services window and any program that shows services, then run the installer again: %w", name, err)
 	}
@@ -274,7 +281,7 @@ func standInCreate(key string, d ServiceDef) error {
 		{"ImagePath", RegExpandString, windows.ComposeCommandLine(append([]string{d.Exec}, d.Args...))},
 		{"DisplayName", RegString, d.DisplayName},
 		{"Description", RegString, d.Description},
-		{"ObjectName", RegString, "LocalSystem"},
+		{"ObjectName", RegString, cmp.Or(d.Account, "LocalSystem")},
 		{"Type", RegNumber, "16"}, // a program of its own
 		{"Start", RegNumber, "2"}, // with the computer
 		{"ErrorControl", RegNumber, "1"},

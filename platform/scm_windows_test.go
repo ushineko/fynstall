@@ -76,3 +76,44 @@ func TestTheRealServiceManagerRunsAServiceAndRemovesIt(t *testing.T) {
 	require.False(t, exists)
 	require.NoError(t, SCMRemove(key), "removing a service that is gone is not an error")
 }
+
+// An account of its own, against the real service manager (spec 010 R2).
+// The program is under %ProgramData%, which every account may read: the
+// account cannot read a test's temporary directory inside a user's profile.
+func TestTheRealServiceManagerRunsAServiceAsItsOwnAccount(t *testing.T) {
+	if os.Getenv("FYNSTALL_TEST_REAL_SERVICES") == "" {
+		t.Skip("set FYNSTALL_TEST_REAL_SERVICES=1 to register a service on this computer")
+	}
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("registering a service needs an administrator")
+	}
+	name := fmt.Sprintf("fynstall-test-own-%d", os.Getpid())
+	dir := filepath.Join(os.Getenv("ProgramData"), name)
+	require.NoError(t, os.Mkdir(dir, 0o750))
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	exe := filepath.Join(dir, "beacon.exe")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", exe, "../examples/beacon")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	out, err := build.CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	key := servicesKey + `\` + name
+	t.Cleanup(func() { _ = SCMRemove(key) })
+	def := ServiceDef{Name: name, DisplayName: name, Description: "A test of fynstall. Safe to remove.", Exec: exe, Args: []string{"serve"}, Restart: "no", Account: VirtualAccount(name)}
+	require.NoError(t, SCMCreate(key, def))
+	require.NoError(t, SCMStart(key), "the account may run a program that every account may read")
+
+	m, err := mgr.Connect()
+	require.NoError(t, err)
+	s, err := m.OpenService(name)
+	require.NoError(t, err)
+	c, err := s.Config()
+	require.NoError(t, err)
+	require.Equal(t, `NT SERVICE\`+name, c.ServiceStartName)
+	require.Equal(t, uint32(windows.SERVICE_SID_TYPE_UNRESTRICTED), c.SidType, "its SID can be named in an access list")
+	require.NoError(t, s.Close())
+	require.NoError(t, m.Disconnect())
+
+	require.NoError(t, SCMRemove(key))
+	require.NoError(t, os.Remove(exe), "its process is gone, so its file can be removed")
+}

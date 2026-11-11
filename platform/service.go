@@ -17,6 +17,11 @@ type Unit struct {
 	// System is true for a system service, which starts with the machine
 	// rather than at the user's login.
 	System bool
+	// Own runs a system service as a user that systemd makes for it, with
+	// a state directory named StateDir (spec 010). A user unit already runs
+	// as its user, so Own changes nothing there.
+	Own      bool
+	StateDir string
 }
 
 // RenderUnit is u as a systemd unit file. Every argument is quoted, and
@@ -30,7 +35,11 @@ func RenderUnit(u Unit) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Written by the installer of %s. Its uninstaller removes it.\n", u.AppID)
 	fmt.Fprintf(&b, "[Unit]\nDescription=%s\n\n", u.Description)
-	fmt.Fprintf(&b, "[Service]\nExecStart=%s\nRestart=%s\n\n", strings.Join(words, " "), u.Restart)
+	fmt.Fprintf(&b, "[Service]\nExecStart=%s\nRestart=%s\n", strings.Join(words, " "), u.Restart)
+	if u.Own && u.System {
+		fmt.Fprintf(&b, "DynamicUser=yes\nStateDirectory=%s\n", u.StateDir)
+	}
+	b.WriteString("\n")
 	target := "default.target"
 	if u.System {
 		target = "multi-user.target"
@@ -67,7 +76,14 @@ type ServiceDef struct {
 	Args []string
 	// Restart is no, on-failure or always.
 	Restart string
+	// Account is the account the service runs as: empty for LocalSystem,
+	// or a virtual account such as NT SERVICE\hello (spec 010).
+	Account string
 }
+
+// VirtualAccount is the account of its own that Windows keeps for the
+// service name.
+func VirtualAccount(name string) string { return `NT SERVICE\` + name }
 
 // servicesKey is where Windows keeps its services, one key each.
 const servicesKey = `HKLM\SYSTEM\CurrentControlSet\Services`
