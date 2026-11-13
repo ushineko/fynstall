@@ -32,6 +32,7 @@ the Windows Uninstall registry entry, have no keys of their own.
 - [targets](#targets)
 - [Placeholders](#placeholders)
 - [What an install writes](#what-an-install-writes)
+- [Upgrade, repair and downgrade](#upgrade-repair-and-downgrade)
 
 ## app
 
@@ -42,7 +43,7 @@ the Windows Uninstall registry entry, have no keys of their own.
 | `version` | yes | A version such as `1.2.3` or `1.2.3-rc.1`. |
 | `publisher` | no | Who makes the program. |
 | `icon` | no | A square PNG of at least 512 px, relative to `fynstall.yaml`. |
-| `licence` | no | A text or Markdown file. The wizard shows it, and the install goes on only once it is accepted. |
+| `licence` | no | A text or Markdown file, UTF-8 and at most 256 KiB. The wizard shows it, and the install goes on only once it is accepted. |
 
 The build resizes the icon to 16, 32, 48, 64, 128, 256 and 512 px. Each
 size is installed into the hicolor icon theme under the app ID. KDE uses
@@ -71,8 +72,9 @@ on Linux, `%LOCALAPPDATA%\Programs` on Windows. See
 
 A per-user install needs no elevation. A system install is for everyone
 on the computer. The installer and the uninstaller stay the person's own
-programs and ask for an administrator once, through `pkexec` in the window
-and `sudo` on the command line; only the changes run as root. When both
+programs and ask for an administrator once: on Linux through `pkexec` in
+the window and `sudo` on the command line, on Windows through one UAC
+prompt. Only the changes run with an administrator's rights. When both
 scopes are offered, the wizard asks "Install for: Just me / Everyone on this
 computer", and the command line takes `--scope system`. A config that
 offers system scope cannot use `{home}`. See [platforms.md](platforms.md).
@@ -82,7 +84,8 @@ The user can choose another directory when the installer asks, or with
 
 ## payload
 
-A list of the files to install. Each entry has these keys:
+A list of the files to install, with at least one entry. Each entry has
+these keys:
 
 | Key | Required | Meaning |
 |---|---|---|
@@ -171,7 +174,7 @@ shortcut named for the entry's `name`; it uses `exec`, `args` and `comment`.
 
 | Key | Required | Meaning |
 |---|---|---|
-| `id` | no | The file name without `.desktop`. The default is `app.id`. |
+| `id` | no | The file name without `.desktop`, a reverse-DNS ID like `app.id`. Two entries cannot have the same ID. The default is `app.id`. |
 | `name` | yes | The name in the launcher. |
 | `comment` | no | One line that describes the program. |
 | `exec` | yes | The payload destination to run. The installer writes its absolute path. |
@@ -215,7 +218,7 @@ access token. Actions use them as `{param:<name>}`.
 
 | Key | Meaning |
 |---|---|
-| `name` | Lowercase letters, digits and dashes. It is also the flag `--<name>`, so it cannot be one of the installer's own flags (`dir`, `yes`, `scope` and the others). |
+| `name` | Lowercase letters, digits and dashes, starting with a letter. It is also the flag `--<name>`, so it cannot be one of the installer's own flags (`dir`, `yes`, `scope` and the others). |
 | `label` | What a prompt and the wizard call it. The default is the name. |
 | `description` | One line of help. |
 | `default` | The value when nothing else gives one. |
@@ -230,8 +233,9 @@ access token. Actions use them as `{param:<name>}`.
    to values; a name that is not a parameter is an error;
 3. on an upgrade, the value the installed version was given, unless the
    parameter is `once`;
-4. a person, when the installer runs in a terminal without `--yes`; a
-   secret is read without echo;
+4. a person: in the wizard's settings page, which starts filled with the
+   values above, or at a prompt when the installer runs in a terminal
+   without `--yes`; a secret is read without echo;
 5. the default.
 
 The install record keeps the values of non-secret parameters, for a later
@@ -276,7 +280,7 @@ installer does not run the program to produce one.
 - `path` starts with `{config}/`, `{data}/` or `{home}/`. Configuration
   lives outside the install directory.
 - `format` is `yaml` or `json`. Without it, the path's extension decides.
-- `values` is one flat map. Keys are written sorted, and each value is
+- `values` is one flat map with at least one value. Keys are written sorted, and each value is
   quoted as the format requires.
 - A file that holds a secret parameter is written readable by its owner
   only (`0600`).
@@ -346,7 +350,7 @@ it.
 |---|---|
 | `exec` | The payload destination to run. It can use `{os}`, `{arch}` and `{exe}`. |
 | `args` | Its arguments. They can use the path placeholders and `{param:<name>}`. |
-| `undo` | The arguments that undo it, or the word `none`. Required. |
+| `undo` | The arguments that undo it, or the word `none`. Required with `on: install`; an `on: uninstall` hook has none. |
 | `on` | `install` (the default) or `uninstall`. |
 | `continue_on_error` | For `on: uninstall` only: let the uninstall go on when the program fails. |
 
@@ -376,8 +380,11 @@ it.
 - A failed install moves the data back. An uninstall does not.
 
 **One at a time.** While an installer or uninstaller of an app runs, a
-second one for the same app and scope is refused. The lock is in
-`$XDG_RUNTIME_DIR/fynstall`, so it leaves nothing in the home.
+second one for the same app and scope is refused. On Linux the lock is in
+`/run/fynstall` for a system install, and otherwise in
+`$XDG_RUNTIME_DIR/fynstall`, or the temporary directory when that is not
+set, so it leaves nothing in the home. On Windows the lock is a named
+mutex.
 
 ## uninstall
 
@@ -420,7 +427,7 @@ What the wizard shows.
 
 | Key | Meaning |
 |---|---|
-| `welcome` | A Markdown file for the first page. Without it, the page says what is installed, by whom, and that it needs no administrator rights. |
+| `welcome` | A Markdown file for the first page, UTF-8 and at most 256 KiB. Without it, the page says what is installed, by whom, and whether the install asks for an administrator. |
 | `launch` | A payload destination that the installer offers to start when it is done. It can use `{os}`, `{arch}` and `{exe}`. |
 | `launch_default` | `true` makes starting it the default. Without it the default is not to. It needs `launch`. |
 
@@ -500,8 +507,9 @@ target, and records the target in the installer's manifest.
 
 ## Placeholders
 
-Path templates in `install.dir` and `keep_on_uninstall` can use these
-names. Each one is resolved on the machine that runs the installer.
+Path templates in `install.dir`, `keep_on_uninstall`, a `config_file`'s
+`path`, a `migrate`'s `from` and `to`, and the `args` of a `service` or a
+`run` can use these names. Each one is resolved on the machine that runs the installer.
 
 | Placeholder | Linux, per-user | Linux, system | Windows, per-user | Windows, system |
 |---|---|---|---|---|
@@ -530,11 +538,13 @@ Outside it:
 
 - `{data}/fynstall/installs/<id>.json` records where the install is. A later
   installer reads it to find the install and its uninstaller.
-- `{data}/applications/<id>.desktop` for each desktop entry.
+- `{data}/applications/<id>.desktop` for each desktop entry, and a second
+  copy in the autostart directory for an entry with `autostart: true`.
 - `{data}/icons/hicolor/<size>x<size>/apps/<app id>.png` for each icon size.
 - `{bin}/<name>` for each link.
 - `{config}/systemd/user/<name>.service` for each service, on Linux;
   `/etc/systemd/system/<name>.service` for a system install.
+- the files that `config_file` actions write.
 
 On Windows a desktop entry is a Start Menu shortcut, the icon is one `.ico`
 file in the install directory, and a link is an entry on the user's `PATH`.
