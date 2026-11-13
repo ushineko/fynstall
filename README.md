@@ -196,9 +196,7 @@ MIT. See [LICENSE](LICENSE).
   directory and refused it: "resolves to ..., outside the directory it
   belongs in". It now treats that path as the old install's own, replaces
   what the old uninstaller puts back, and keeps that to put back in turn, so
-  the earlier copy survives any number of upgrades. An install built by
-  0.2.4 or earlier still fails to upgrade itself this way; running its
-  uninstaller first, then the new installer, gets past it.
+  the earlier copy survives any number of upgrades.
 
 ### 0.2.4 (2026-10-13)
 
