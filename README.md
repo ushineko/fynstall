@@ -101,6 +101,33 @@ and hooks, in Go, are in [docs/extensions.md](docs/extensions.md).
 
 Linux comes first, then Windows. macOS is later.
 
+## Compared with `fyne package`
+
+**Fyne's own tool packages a program; fynstall installs it.** `fyne package`
+embeds the icon and metadata and writes the program in each platform's
+native form. `fyne release` adds signed store packages. Neither one gives
+the person who downloads the program an installer to run.
+
+| | `fyne package` and `fyne release` | fynstall |
+|---|---|---|
+| Linux | a `.tar.xz` with a `Makefile`; the user runs `make install` | one installer binary, with a wizard or a command line |
+| Windows | an `.exe` with its icon, or a signed `.msix` | one installer: per-user or system-wide, Start Menu, Settings > Apps, `PATH` |
+| Uninstall | the `Makefile`, or the store | an uninstaller that removes what the install created and restores what it replaced |
+| Questions at install time | none | an install directory, parameters, configuration files written from the answers |
+| Services | none | systemd units and Windows services |
+| No graphics libraries | not applicable | the `-cli-installer`, with no Fyne and no cgo |
+| Before any change | none | `--dry-run` lists every change |
+
+**Use fynstall** when you ship the program yourself, from a website or a
+release page, and the person who gets it expects to run one file. It also
+fits a program that needs a system-wide install, a service, or settings
+asked at install time, and a server that has no display.
+
+**Use `fyne package` and `fyne release`** for the Microsoft Store, the Mac
+App Store, Android and iOS, and for a macOS `.app`, which fynstall does not
+make yet. Use them too when a distribution package or Flatpak installs the
+program.
+
 ## Development
 
 ```bash
