@@ -101,7 +101,12 @@ mingw would be a test that reports on the machine.
 */
 func TestACompilerOnPathIsAccepted(t *testing.T) {
 	dir := t.TempDir()
-	cc := filepath.Join(dir, "pretend-gcc")
+	// Windows finds a program on PATH only with an extension it runs.
+	name := "pretend-gcc"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	cc := filepath.Join(dir, name)
 	if err := os.WriteFile(cc, []byte("#!/bin/sh\nexit 0\n"), 0o750); err != nil { //nolint:gosec // a test's own stub
 		t.Fatal(err)
 	}
