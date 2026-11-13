@@ -536,8 +536,9 @@ Inside the install directory:
 
 Outside it:
 
-- `{data}/fynstall/installs/<id>.json` records where the install is. A later
-  installer reads it to find the install and its uninstaller.
+- `{data}/fynstall/installs/<id>.json` records where the install is, or
+  `/var/lib/fynstall/installs/<id>.json` for a system install on Linux. A
+  later installer reads it to find the install and its uninstaller.
 - `{data}/applications/<id>.desktop` for each desktop entry, and a second
   copy in the autostart directory for an entry with `autostart: true`.
 - `{data}/icons/hicolor/<size>x<size>/apps/<app id>.png` for each icon size.

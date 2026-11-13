@@ -1,8 +1,8 @@
 # What an install does on each platform
 
 `fynstall.yaml` means the same on every platform (spec 002). This page
-says what the platform backends do with it. Windows arrives in parts with
-spec 001 phase 7; the Windows section says what is there. macOS is later.
+says what the platform backends do with it on Linux and on Windows. macOS
+is not supported yet.
 
 ## Linux
 
@@ -21,7 +21,7 @@ spec 001 phase 7; the Windows section says what is there. macOS is later.
 | Icons | `{data}/icons/hicolor/<size>/apps` | `/usr/local/share/icons/hicolor/<size>/apps` |
 | Entries that start at login | `{config}/autostart` | `/etc/xdg/autostart` |
 | Services | systemd user units in `{config}/systemd/user`, started at login | system units in `/etc/systemd/system`, started at boot |
-| Install lock | `$XDG_RUNTIME_DIR/fynstall` | `/run/fynstall` |
+| Install lock | `$XDG_RUNTIME_DIR/fynstall`, else a directory of the user's own in the temporary directory | `/run/fynstall` |
 
 A system install stays out of `/usr/share` and `/usr/bin`, which belong to
 the package manager. Desktops read `/usr/local/share` by default, so its
@@ -62,8 +62,8 @@ which shows the desktop's password dialog) or `sudo` (on the command line).
 
 Windows has per-user installs and installs for everyone on the computer,
 from the wizard and from the command line, with a Start Menu shortcut, an
-entry in Settings > Apps and an entry on `PATH`. Services follow in spec 001
-phase 7.
+entry in Settings > Apps and an entry on `PATH`, and services for an
+install for everyone.
 
 ### Paths
 
@@ -97,10 +97,10 @@ of `LOCALAPPDATA` or `APPDATA` is ignored.
 Windows has no directory of links, so there is no `{bin}`. A template that
 names `{bin}` fails with "no value for {bin}".
 
-A full installer, with the wizard, builds on Windows for Windows and needs a
-C compiler (`gcc` on `PATH`, as MSYS2 provides). `fynstall build --cli-only
---target windows/amd64` builds from Linux and from Windows, with no C
-compiler.
+A full installer, with the wizard, needs a C compiler that targets Windows:
+`gcc` on Windows, as MSYS2 provides, or `x86_64-w64-mingw32-gcc` on Linux.
+The build needs no Windows SDK. `fynstall build --cli-only --target
+windows/amd64` builds from Linux and from Windows, with no C compiler.
 
 ### Elevation
 
