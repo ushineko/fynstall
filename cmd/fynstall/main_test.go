@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -55,10 +56,17 @@ func TestAFullBuildForAnotherTargetNeedsACompilerForIt(t *testing.T) {
 	if runtime.GOARCH == "arm64" {
 		other = "linux/amd64"
 	}
+	// A config of its own, so the test does not depend on make hello having
+	// built examples/hello: the refusal comes before the payload is read.
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "bin"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bin", "hello"), []byte("#!/bin/sh\n"), 0o600))
+	cfg := filepath.Join(dir, "fynstall.yaml")
+	require.NoError(t, os.WriteFile(cfg, []byte("app: {id: io.example.hello, name: Hello, version: 0.1.0}\n"+
+		"payload:\n  - {src: bin/hello, dst: bin/hello}\n"), 0o600))
 	var out, errOut bytes.Buffer
 	code := run(context.Background(), []string{
-		"build", "-c", "../../examples/hello/fynstall.yaml", "-o", t.TempDir(),
-		"--target", other,
+		"build", "-c", cfg, "-o", t.TempDir(), "--target", other,
 	}, &out, &errOut)
 	if code == 0 {
 		// This machine has a cross compiler for that target, so the build was

@@ -178,5 +178,5 @@ func shellUser() (*windows.SID, error) {
 	if err != nil {
 		return nil, err //nolint:wrapcheck // as above
 	}
-	return u.User.Sid.Copy()
+	return u.User.Sid.Copy() //nolint:wrapcheck // as above
 }
