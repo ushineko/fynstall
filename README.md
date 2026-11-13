@@ -9,15 +9,14 @@ through Go embedding, so the person who runs it needs no toolchain.
 
 ## Status
 
-Early development. The plan is [spec 001](specs/001-installer-prototype.md),
-delivered in phases; this README changes as each phase lands.
+In use for real programs on Linux and Windows, before 1.0. A release can
+add config keys. The config format and the receipt change only by addition,
+so an install made by an earlier release keeps its uninstaller working.
 
-Linux installers, per-user, with a wizard and a command line, launcher
-entries, icons, links on `PATH`, parameters and configuration files, and
-system-wide installs and upgrades. On Windows: per-user and system-wide
-installs from the wizard and the command line, with a Start Menu shortcut,
-an entry in Settings > Apps and an entry on `PATH`, and services for a
-system-wide install.
+Not done yet: macOS, signing the installer, permissions on an installed
+directory, and checks for a minimum OS version. The open work is in
+[spec 001](specs/001-installer-prototype.md) and
+[spec 002](specs/002-replacing-a-production-installer.md).
 
 ## Using it
 
@@ -80,26 +79,41 @@ does on each platform, with the paths and elevation, in
 [docs/platforms.md](docs/platforms.md). A program's own installer pages
 and hooks, in Go, are in [docs/extensions.md](docs/extensions.md).
 
-## What it will do
+## What it does
 
 - **One binary, two front ends.** The installer runs as a wizard when it is
   started from a desktop, and as a command-line program when it is started
   from a terminal. `--gui` and `--cli` override the choice.
+- **A plan before any change.** The installer shows every change it will
+  make before it makes one. `--dry-run` prints the plan and stops. A failed
+  install undoes what it did.
 - **An uninstaller that puts things back.** Each install puts a separate
   uninstaller beside the program. The uninstaller removes what the install
   created and restores what it replaced, including registry values on
   Windows. Only the installed uninstaller removes a program, so removal
   always matches what was installed.
+- **Upgrade, repair and downgrade.** An installer run over an installed
+  version removes it with that version's own uninstaller and keeps the
+  parameters it was given.
 - **Per-user and system-wide installs.** A system install asks for
-  elevation once, for the step that writes files. The window never runs as
-  root.
-- **Desktop integration.** Launcher entries, icons at every size, and links
-  on `PATH` on Linux; Start Menu shortcuts and an entry in Settings > Apps on
-  Windows.
+  elevation once, for the step that makes the changes. On Linux the window
+  never runs as root.
+- **Desktop integration.** Launcher entries, icons at every size, links on
+  `PATH` and start at login on Linux; Start Menu shortcuts, an entry in
+  Settings > Apps, `PATH` and the Startup folder on Windows.
+- **Parameters and configuration files.** A config declares parameters,
+  given by flag, by a file beside the installer, at a prompt or in the
+  wizard, and writes them into a YAML or JSON file. Secrets are never
+  printed, logged or recorded.
+- **Services and other actions.** A systemd unit or a Windows service, a
+  program run at install or uninstall time with its undo, and a move of an
+  older version's data.
+- **A program's own pages and hooks**, in Go, linked into the installer
+  and the uninstaller ([docs/extensions.md](docs/extensions.md)).
+- **NSIS-compatible switches** (`/S`, `/D=`), so scripts that ran a
+  program's NSIS installer run the new one unchanged.
 - **A command-line-only build** with no Fyne and no cgo, for machines with
   no graphics libraries.
-
-Linux comes first, then Windows. macOS is later.
 
 ## Compared with `fyne package`
 
@@ -110,9 +124,9 @@ the person who downloads the program an installer to run.
 
 | | `fyne package` and `fyne release` | fynstall |
 |---|---|---|
-| Linux | a `.tar.xz` with a `Makefile`; the user runs `make install` | one installer binary, with a wizard or a command line |
-| Windows | an `.exe` with its icon, or a signed `.msix` | one installer: per-user or system-wide, Start Menu, Settings > Apps, `PATH` |
-| Uninstall | the `Makefile`, or the store | an uninstaller that removes what the install created and restores what it replaced |
+| Linux | a `.tar.xz` with a `Makefile`; the user runs `make install` or `make user-install` | one installer binary, with a wizard or a command line |
+| Windows | an `.exe` with its icon, or a signed `.appx` | one installer: per-user or system-wide, Start Menu, Settings > Apps, `PATH` |
+| Uninstall | `make uninstall`, or the store | an uninstaller that removes what the install created and restores what it replaced |
 | Questions at install time | none | an install directory, parameters, configuration files written from the answers |
 | Services | none | systemd units and Windows services |
 | No graphics libraries | not applicable | the `-cli-installer`, with no Fyne and no cgo |
