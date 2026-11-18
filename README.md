@@ -166,6 +166,16 @@ MIT. See [LICENSE](LICENSE).
 
 ## Changelog
 
+### Unreleased
+
+- **Fix**: the wizard opens for a config with a parameter on the settings
+  page ([#52](https://github.com/ushineko/fynstall/issues/52)). An
+  installer built from such a config stopped with a nil pointer before its
+  window: the page's text field measured its placeholder, and the wizard's
+  pages are made before the app is. The fix is in fynedesygn 0.1.122
+  (fynedesygn spec 084), which fynstall now requires. The command line was
+  not affected.
+
 ### 0.2.7 (2026-11-10)
 
 - **Added**: a service can run as an account of its own, `account: own`
