@@ -111,6 +111,9 @@ func TestAProgramsOwnPageSetsAParameterAndItsHooksRun(t *testing.T) {
 	w.Next() // Settings
 	w.Next() // Location
 	require.Equal(t, "Ready", w.Current().Title())
+	// At the window's size: a summary row cuts a value to the width it has,
+	// and a headless wizard has none until it is given one.
+	w.Content().Resize(fyne.NewSize(wizard.DefaultWidth, wizard.DefaultHeight))
 	require.NotNil(t, fynetest.FindLabel(w.Content(), "before the install, runs Hello's own set-up code"),
 		"the summary says the program's own code will run (R7)")
 	require.Empty(t, *ran, "nothing of the program's runs before Install")

@@ -71,15 +71,15 @@ func TestTheLaunchCheckStartsAsTheConfigSays(t *testing.T) {
 /*
 The wizard is made before the app is: wizard.Run starts one. An installer
 whose config starts the program by default stopped here with a nil pointer,
-before any window, because ticking the check drew it. Every other test of the
+before any window, because ticking the check drew it. One whose config has a
+parameter on the settings page stopped the same way, in the entry's
+placeholder (#52, fixed in fynedesygn 0.1.122). Every other test of the
 wizard has the test app behind it, which is why none of them said so.
 */
 func TestTheWizardIsMadeBeforeThereIsAnApp(t *testing.T) {
 	m, p, e, _ := guiFixture(t)
 	m.LaunchDefault = true
-	// Without the settings page, which is not made before the app either
-	// and has an issue of its own (#52).
-	m.Parameters = nil
+	require.NotEmpty(t, m.Parameters, "the settings page is made too")
 	was := fyne.CurrentApp()
 	fyne.SetCurrentApp(nil)
 	t.Cleanup(func() { fyne.SetCurrentApp(was) })
